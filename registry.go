@@ -1,1 +1,221 @@
 package llmtools
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/ppipada/llmtools-go/internal/jsonutil"
+	"github.com/ppipada/llmtools-go/internal/logutil"
+	"github.com/ppipada/llmtools-go/spec"
+)
+
+// Registry provides lookup/register for Go tools by funcID, with json.RawMessage I/O.
+type Registry struct {
+	mu     sync.RWMutex
+	logger *slog.Logger
+
+	toolMap     map[spec.FuncID]spec.ToolFunc
+	toolSpecMap map[spec.FuncID]spec.Tool
+
+	timeout time.Duration
+}
+
+type RegistryOption func(*Registry) error
+
+func WithCallTimeoutForAll(d time.Duration) RegistryOption {
+	return func(gr *Registry) error {
+		gr.timeout = d
+		return nil
+	}
+}
+
+func WithLogger(logger *slog.Logger) RegistryOption {
+	return func(ps *Registry) error {
+		ps.logger = logger
+		return nil
+	}
+}
+
+func NewRegistry(opts ...RegistryOption) (*Registry, error) {
+	r := &Registry{
+		toolMap:     make(map[spec.FuncID]spec.ToolFunc),
+		toolSpecMap: make(map[spec.FuncID]spec.Tool),
+	}
+	for _, o := range opts {
+		if err := o(r); err != nil {
+			return nil, err
+		}
+	}
+	if r.logger != nil {
+		logutil.SetDefault(r.logger)
+	} else {
+		logutil.SetDefault(nil)
+	}
+	return r, nil
+}
+
+// RegisterOutputsTool registers a typed tool function that directly returns []ToolStoreOutputUnion.
+// This is a function and not a method on struct as methods cannot have type params in go.
+func RegisterOutputsTool[T any](
+	r *Registry,
+	tool spec.Tool,
+	fn func(context.Context, T) ([]spec.ToolStoreOutputUnion, error),
+) error {
+	return r.RegisterTool(tool, typedToOutputs(fn))
+}
+
+// RegisterTypedAsTextTool registers a typed tool function whose output R is JSON-encodable.
+// The JSON representation of R is wrapped into a single text block.
+// This is a function and not a method on struct as methods cannot have type params in go.
+func RegisterTypedAsTextTool[T, R any](
+	r *Registry,
+	tool spec.Tool,
+	fn func(context.Context, T) (R, error),
+) error {
+	return r.RegisterTool(tool, typedToText(fn))
+}
+
+func (r *Registry) RegisterTool(tool spec.Tool, fn spec.ToolFunc) error {
+	if tool.GoImpl.FuncID == "" {
+		return errors.New("invalid tool: missing funcID")
+	}
+	if fn == nil {
+		return errors.New("invalid tool: nil func")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.toolMap[tool.GoImpl.FuncID]; exists {
+		return fmt.Errorf("go-tool already registered: %s", tool.GoImpl.FuncID)
+	}
+	r.toolMap[tool.GoImpl.FuncID] = fn
+	r.toolSpecMap[tool.GoImpl.FuncID] = tool
+	return nil
+}
+
+// CallOption configures per-call behavior.
+type CallOption func(*callOptions)
+
+type callOptions struct {
+	timeout *time.Duration
+}
+
+// WithCallTimeout overrides the timeout for this single call.
+// 0 means "no timeout" for this call (even if tool/registry default is non-zero).
+func WithCallTimeout(d time.Duration) CallOption {
+	dd := d
+	return func(o *callOptions) {
+		o.timeout = &dd
+	}
+}
+
+func (r *Registry) Call(
+	ctx context.Context,
+	funcID spec.FuncID,
+	in json.RawMessage,
+	callOpts ...CallOption,
+) ([]spec.ToolStoreOutputUnion, error) {
+	var co callOptions
+	for _, o := range callOpts {
+		if o != nil {
+			o(&co)
+		}
+	}
+
+	// Resolve timeout: call override > registry default.
+	effectiveTimeout := r.timeout
+	r.mu.RLock()
+	if co.timeout != nil {
+		effectiveTimeout = *co.timeout
+	}
+	r.mu.RUnlock()
+
+	// Treat negative like "no timeout" (avoid surprising immediate cancellation).
+	if effectiveTimeout < 0 {
+		effectiveTimeout = 0
+	}
+
+	if effectiveTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, effectiveTimeout)
+		defer cancel()
+	}
+
+	fn, ok := r.Lookup(funcID)
+	if !ok {
+		return nil, fmt.Errorf("unknown tool: %s", funcID)
+	}
+	return fn(ctx, in)
+}
+
+func (r *Registry) Lookup(funcID spec.FuncID) (spec.ToolFunc, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	fn, ok := r.toolMap[funcID]
+	return fn, ok
+}
+
+func (r *Registry) Tools() []spec.Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]spec.Tool, 0, len(r.toolSpecMap))
+	for _, t := range r.toolSpecMap {
+		out = append(out, t)
+	}
+	return out
+}
+
+// typedToOutputs wraps a typed function (ctx, T) -> ([]ToolStoreOutputUnion, error)
+// into a spec.ToolFunc that strictly decodes input into T.
+func typedToOutputs[T any](
+	fn func(context.Context, T) ([]spec.ToolStoreOutputUnion, error),
+) spec.ToolFunc {
+	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolStoreOutputUnion, error) {
+		// Decode input strictly into T (rejects unknown fields and trailing data).
+		args, err := jsonutil.DecodeJSONRaw[T](in)
+		if err != nil {
+			return nil, fmt.Errorf("invalid input: %w", err)
+		}
+		return fn(ctx, args)
+	}
+}
+
+// typedToText wraps a typed function (ctx, T) -> (R, error) into a spec.ToolFunc
+// that JSON-encodes R and returns it as a single text output block.
+func typedToText[T, R any](fn func(context.Context, T) (R, error)) spec.ToolFunc {
+	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolStoreOutputUnion, error) {
+		// Decode input strictly into T (rejects unknown fields and trailing data).
+		args, err := jsonutil.DecodeJSONRaw[T](in)
+		if err != nil {
+			return nil, fmt.Errorf("invalid input: %w", err)
+		}
+
+		out, err := fn(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := jsonutil.EncodeToJSONRaw(out)
+		if err != nil {
+			return nil, fmt.Errorf("encode output: %w", err)
+		}
+
+		text := string(raw)
+		if text == "" || text == "null" {
+			return nil, nil
+		}
+		return []spec.ToolStoreOutputUnion{
+			{
+				Kind: spec.ToolStoreOutputKindText,
+				TextItem: &spec.ToolStoreOutputText{
+					Text: text,
+				},
+			},
+		}, nil
+	}
+}
