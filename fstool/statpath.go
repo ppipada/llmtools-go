@@ -1,4 +1,4 @@
-package fs
+package fstool
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const StatPathFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fs/statpath.StatPath"
+const StatPathFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/statpath.StatPath"
 
 var StatPathTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -49,7 +49,10 @@ type StatPathOut struct {
 }
 
 // StatPath returns basic metadata for the supplied path without mutating the file system.
-func StatPath(_ context.Context, args StatPathArgs) (*StatPathOut, error) {
+func StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	pathInfo, err := fileutil.StatPath(args.Path)
 	if err != nil {
 		return nil, err

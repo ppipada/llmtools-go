@@ -1,14 +1,18 @@
 package llmtools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/ppipada/llmtools-go/fstool"
+	"github.com/ppipada/llmtools-go/imagetool"
 	"github.com/ppipada/llmtools-go/internal/jsonutil"
 	"github.com/ppipada/llmtools-go/internal/logutil"
 	"github.com/ppipada/llmtools-go/spec"
@@ -26,6 +30,24 @@ type Registry struct {
 }
 
 type RegistryOption func(*Registry) error
+
+// NewBuiltinRegistry returns a Registry with all built-in tools registered.
+// By default it applies a 5s timeout, but callers can override it by passing
+// WithCallTimeoutForAll as a later option.
+func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
+	defaults := []RegistryOption{
+		WithCallTimeoutForAll(5 * time.Second),
+	}
+	defaults = append(defaults, opts...)
+	r, err := NewRegistry(defaults...)
+	if err != nil {
+		return nil, err
+	}
+	if err := RegisterBuiltins(r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
 
 func WithCallTimeoutForAll(d time.Duration) RegistryOption {
 	return func(gr *Registry) error {
@@ -57,6 +79,26 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 		logutil.SetDefault(nil)
 	}
 	return r, nil
+}
+
+// RegisterBuiltins registers the built-in tools into r.
+func RegisterBuiltins(r *Registry) error {
+	if err := RegisterOutputsTool(r, fstool.ReadFileTool, fstool.ReadFile); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool, fstool.ListDirectory); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool, fstool.SearchFiles); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool, fstool.StatPath); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, imagetool.InspectImageTool, imagetool.InspectImage); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RegisterOutputsTool registers a typed tool function that directly returns []ToolStoreOutputUnion.
@@ -94,16 +136,17 @@ func (r *Registry) RegisterTool(tool spec.Tool, fn spec.ToolFunc) error {
 		return fmt.Errorf("go-tool already registered: %s", tool.GoImpl.FuncID)
 	}
 	r.toolMap[tool.GoImpl.FuncID] = fn
-	r.toolSpecMap[tool.GoImpl.FuncID] = tool
+	r.toolSpecMap[tool.GoImpl.FuncID] = cloneTool(tool)
+
 	return nil
 }
-
-// CallOption configures per-call behavior.
-type CallOption func(*callOptions)
 
 type callOptions struct {
 	timeout *time.Duration
 }
+
+// CallOption configures per-call behavior.
+type CallOption func(*callOptions)
 
 // WithCallTimeout overrides the timeout for this single call.
 // 0 means "no timeout" for this call (even if tool/registry default is non-zero).
@@ -128,8 +171,8 @@ func (r *Registry) Call(
 	}
 
 	// Resolve timeout: call override > registry default.
-	effectiveTimeout := r.timeout
 	r.mu.RLock()
+	effectiveTimeout := r.timeout
 	if co.timeout != nil {
 		effectiveTimeout = *co.timeout
 	}
@@ -166,8 +209,15 @@ func (r *Registry) Tools() []spec.Tool {
 
 	out := make([]spec.Tool, 0, len(r.toolSpecMap))
 	for _, t := range r.toolSpecMap {
-		out = append(out, t)
+		out = append(out, cloneTool(t))
 	}
+	sort.Slice(out, func(i, j int) bool {
+		// Stable tool manifests matter for prompts and tests.
+		if out[i].Slug != out[j].Slug {
+			return out[i].Slug < out[j].Slug
+		}
+		return out[i].GoImpl.FuncID < out[j].GoImpl.FuncID
+	})
 	return out
 }
 
@@ -218,4 +268,16 @@ func typedToText[T, R any](fn func(context.Context, T) (R, error)) spec.ToolFunc
 			},
 		}, nil
 	}
+}
+
+func cloneTool(t spec.Tool) spec.Tool {
+	// ArgSchema is json.RawMessage ([]byte) => must deep copy.
+	if len(t.ArgSchema) > 0 {
+		t.ArgSchema = bytes.Clone(t.ArgSchema)
+	}
+	// Tags is a slice => must deep copy.
+	if len(t.Tags) > 0 {
+		t.Tags = append([]string(nil), t.Tags...)
+	}
+	return t
 }

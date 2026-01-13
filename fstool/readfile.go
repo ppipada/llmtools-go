@@ -1,4 +1,4 @@
-package fs
+package fstool
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const ReadFileFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fs/readfile.ReadFile"
+const ReadFileFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/readfile.ReadFile"
 
 var ReadFileTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -58,7 +58,7 @@ const maxReadBytes = 16 * 1024 * 1024 // 16MB safety limit
 
 // ReadFile reads a file from disk and returns its contents.
 // If Encoding == "binary" the output is base64-encoded.
-func ReadFile(_ context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
+func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
 	// Normalize and validate encoding.
 	enc := fileutil.ReadEncoding(strings.TrimSpace(args.Encoding))
 	if enc == "" {
@@ -110,7 +110,7 @@ func ReadFile(_ context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion
 		if isPDF {
 			// PDF: use the same extraction logic as attachments.
 			// Extraction itself is limited to maxReadBytes via LimitedReader.
-			text, err := pdfutil.ExtractPDFTextSafe(path, maxReadBytes)
+			text, err := pdfutil.ExtractPDFTextSafe(ctx, path, maxReadBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -134,7 +134,7 @@ func ReadFile(_ context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion
 		}
 
 		// Normal text file: read and validate UTF‑8.
-		data, err := fileutil.ReadFile(path, fileutil.ReadEncodingText)
+		data, err := fileutil.ReadFile(path, fileutil.ReadEncodingText, maxReadBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +156,7 @@ func ReadFile(_ context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion
 	}
 
 	// Binary mode: base64-encode and return, like before.
-	data, err := fileutil.ReadFile(path, fileutil.ReadEncodingBinary)
+	data, err := fileutil.ReadFile(path, fileutil.ReadEncodingBinary, maxReadBytes)
 	if err != nil {
 		return nil, err
 	}

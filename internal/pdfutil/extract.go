@@ -2,6 +2,7 @@ package pdfutil
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 )
 
 // ExtractPDFTextSafe extracts text from a local PDF with a byte limit and panic recovery.
-func ExtractPDFTextSafe(path string, maxBytes int) (text string, err error) {
+func ExtractPDFTextSafe(ctx context.Context, path string, maxBytes int) (text string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			logutil.Warn("panic during PDF text extraction", "path", path, "panic", r)

@@ -20,7 +20,7 @@ func init() {
 // Slog-compatible top-level functions.
 //
 
-// Debug logs at LevelDebug using the process-wide logger.
+// Debug logs at LevelDebug using the logger.
 func Debug(msg string, args ...any) {
 	Default().Debug(msg, args...)
 }

@@ -1,4 +1,4 @@
-package fs
+package fstool
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const ListDirectoryFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fs/listdirectory.ListDirectory"
+const ListDirectoryFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/listdirectory.ListDirectory"
 
 var ListDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -51,7 +51,10 @@ type ListDirectoryOut struct {
 
 // ListDirectory lists files / dirs in Path. If Pattern is supplied, the
 // results are filtered via filepath.Match.
-func ListDirectory(_ context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
+func ListDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := fileutil.ListDirectory(args.Path, args.Pattern)
 	if err != nil {
 		return nil, err

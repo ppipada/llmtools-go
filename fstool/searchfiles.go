@@ -1,4 +1,4 @@
-package fs
+package fstool
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const SearchFilesFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fs/searchfiles.SearchFiles"
+const SearchFilesFuncID spec.FuncID = "github.com/ppipada/llmtools-go/fstool/searchfiles.SearchFiles"
 
 var SearchFilesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -57,8 +57,8 @@ type SearchFilesOut struct {
 
 // SearchFiles walks Root (recursively) and returns up to MaxResults files
 // whose *path* or *UTF-8 text content* match the supplied regexp.
-func SearchFiles(_ context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
-	matches, err := fileutil.SearchFiles(args.Root, args.Pattern, args.MaxResults)
+func SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
+	matches, err := fileutil.SearchFiles(ctx, args.Root, args.Pattern, args.MaxResults)
 	if err != nil {
 		return nil, err
 	}

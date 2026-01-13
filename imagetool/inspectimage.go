@@ -1,4 +1,4 @@
-package image
+package imagetool
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/ppipada/llmtools-go/spec"
 )
 
-const InspectImageFuncID spec.FuncID = "github.com/ppipada/llmtools-go/image/inspectimage.InspectImage"
+const InspectImageFuncID spec.FuncID = "github.com/ppipada/llmtools-go/imagetool/inspectimage.InspectImage"
 
 var InspectImageTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -52,6 +52,9 @@ type InspectImageOut struct {
 
 // InspectImage inspects an image file and returns its intrinsic metadata.
 func InspectImage(ctx context.Context, args InspectImageArgs) (*InspectImageOut, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := fileutil.ReadImage(args.Path, false)
 	if err != nil {
 		return nil, err

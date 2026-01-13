@@ -49,4 +49,4 @@ type Tool struct {
 
 // ToolFunc is the low-level function signature stored in the registry.
 // It receives JSON-encoded args and returns one or more tool-store outputs.
-type ToolFunc func(ctx context.Context, in JSONSchema) ([]ToolStoreOutputUnion, error)
+type ToolFunc func(ctx context.Context, in json.RawMessage) ([]ToolStoreOutputUnion, error)
