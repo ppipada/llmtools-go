@@ -13,6 +13,7 @@ LLM Tool implementations for Golang
   - [Registry with Built-ins](#registry-with-built-ins)
   - [Direct Tool Usage](#direct-tool-usage)
 - [Development](#development)
+- [License](#license)
 
 ## Features at a glance
 
@@ -120,3 +121,10 @@ func main() {
   - Keep the public API (`package llmtools` and `spec`) small and intentional.
   - Avoid leaking provider‑specific types through the public surface; put them under `internal/`.
   - Please run tests and linters before sending a PR.
+
+## License
+
+Copyright (c) 2026 - Present - Pankaj Pipada
+
+All source code in this repository, unless otherwise noted, is licensed under the MIT License.
+See [LICENSE](./LICENSE) for details.
