@@ -19,17 +19,14 @@ LLM Tool implementations for Golang
 ## Features at a glance
 
 - Go-native tool implementations for common local tasks. Current tools:
-
   - File system (`fstool`):
-
     - List directory (`listdir`): Lists entries under a directory, optionally filtered via glob.
     - Read file (`readfile`): Reads local files as UTF-8 text (rejects non-text content) or base64 binary (with image/file output kinds). Includes a size cap for safety.
     - Search files (`searchfiles`): Recursively searches path and (text) content using RE2 regex.
     - Inspect path (`statpath`): Returns existence, size, timestamps, and directory flag.
 
   - Images (`imagetool`):
-
-    - Inspect image (`inspectimage`): Returns dimensions, format, size, modtime for local images.
+    - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents..
 
 - Tool registry for:
   - collecting and listing tool manifests (stable ordering)
