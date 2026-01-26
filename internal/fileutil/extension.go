@@ -243,33 +243,52 @@ var BaseMIMEToMode = map[string]ExtensionMode{
 var ModeToExtensions = func() map[ExtensionMode][]FileExt {
 	m := make(map[ExtensionMode][]FileExt, len(AllExtensionModes))
 	for ext, mt := range ExtensionToMIMEType {
-		mode := modeForMIME(mt)
+		mode := GetModeForMIME(mt)
 		m[mode] = append(m[mode], ext)
 	}
 	return m
 }()
 
-// MIMEForLocalFile returns a best-effort MIME type and a coarse "mode" (text/image/document/default).
+// MIMEDetectMethod describes how MIME detection was performed.
+// It is intentionally coarse (extension vs sniff).
+type MIMEDetectMethod string
+
+const (
+	MIMEDetectMethodExtension MIMEDetectMethod = "extension"
+	MIMEDetectMethodSniff     MIMEDetectMethod = "sniff"
+)
+
+// MIMEForLocalFile returns a best-effort MIME type, "file mode" (text/image/document/default) and detection method.
 //
 // Behavior:
 //   - First try extension-based detection (internal registry + stdlib).
 //   - If extension detection is unknown or generic, sniff the file bytes.
 //   - Sniffing uses DetectContentType + a small "isProbablyTextSample" heuristic.
-func MIMEForLocalFile(path string) (mimeType MIMEType, mode ExtensionMode, err error) {
+//
+// Detection method can be:
+//   - extension: a non-generic MIME type was derived from the file extension (no file IO required)
+//   - sniff: content sniffing was used (requires opening/reading the file)
+func MIMEForLocalFile(
+	path string,
+) (mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
 	if strings.TrimSpace(path) == "" {
-		return MIMEEmpty, ExtensionModeDefault, ErrInvalidPath
+		return MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, ErrInvalidPath
 	}
 
 	ext := filepath.Ext(path)
 	if ext != "" {
 		mt, e := MIMEFromExtensionString(ext)
-		if e == nil && mt != MIMEEmpty && baseMIME(mt) != string(MIMEApplicationOctetStream) {
-			return mt, modeForMIME(mt), nil
+		if e == nil && mt != MIMEEmpty && GetBaseMIME(mt) != string(MIMEApplicationOctetStream) {
+			return mt, GetModeForMIME(mt), MIMEDetectMethodExtension, nil
 		}
 		// Unknown or generic => sniff.
 	}
 
-	return SniffFileMIME(path)
+	mt, m, e := SniffFileMIME(path)
+	if e != nil {
+		return MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, e
+	}
+	return mt, m, MIMEDetectMethodSniff, nil
 }
 
 // MIMEFromExtensionString returns a best-known MIME for the given extension string.
@@ -282,7 +301,7 @@ func MIMEFromExtensionString(ext string) (MIMEType, error) {
 		return MIMEEmpty, ErrInvalidPath
 	}
 
-	e := normalizeExt(ext)
+	e := GetNormalizedExt(ext)
 	if e == "" {
 		return MIMEEmpty, ErrInvalidPath
 	}
@@ -325,10 +344,10 @@ func SniffFileMIME(path string) (mimeType MIMEType, mode ExtensionMode, err erro
 	}
 
 	mt := MIMEType(http.DetectContentType(sample))
-	m := modeForMIME(mt)
+	m := GetModeForMIME(mt)
 
 	// If DetectContentType is generic, try to classify text via heuristic.
-	if baseMIME(mt) == string(MIMEApplicationOctetStream) || mt == MIMEEmpty {
+	if GetBaseMIME(mt) == string(MIMEApplicationOctetStream) || mt == MIMEEmpty {
 		if isProbablyTextSample(sample) {
 			return MIMETextPlain, ExtensionModeText, nil
 		}
@@ -344,8 +363,8 @@ func SniffFileMIME(path string) (mimeType MIMEType, mode ExtensionMode, err erro
 	return mt, m, nil
 }
 
-func modeForMIME(mt MIMEType) ExtensionMode {
-	base := baseMIME(mt)
+func GetModeForMIME(mt MIMEType) ExtensionMode {
+	base := GetBaseMIME(mt)
 	if m, ok := BaseMIMEToMode[base]; ok {
 		return m
 	}
@@ -366,7 +385,7 @@ func modeForMIME(mt MIMEType) ExtensionMode {
 	return ExtensionModeDefault
 }
 
-func baseMIME(mt MIMEType) string {
+func GetBaseMIME(mt MIMEType) string {
 	s := strings.TrimSpace(strings.ToLower(string(mt)))
 	if s == "" {
 		return ""
@@ -376,6 +395,18 @@ func baseMIME(mt MIMEType) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// GetNormalizedExt lowercases and ensures a leading '.' for an extension.
+func GetNormalizedExt(ext string) FileExt {
+	e := strings.TrimSpace(ext)
+	if e == "" {
+		return FileExt("")
+	}
+	if !strings.HasPrefix(e, ".") {
+		e = "." + e
+	}
+	return FileExt(strings.ToLower(e))
 }
 
 // isProbablyTextSample returns true if the byte sample looks like text.
@@ -400,16 +431,4 @@ func isProbablyTextSample(p []byte) bool {
 	}
 	// If >10% bytes are control chars, assume binary.
 	return controlCount*10 <= len(p)
-}
-
-// normalizeExt lowercases and ensures a leading '.' for an extension.
-func normalizeExt(ext string) FileExt {
-	e := strings.TrimSpace(ext)
-	if e == "" {
-		return FileExt("")
-	}
-	if !strings.HasPrefix(e, ".") {
-		e = "." + e
-	}
-	return FileExt(strings.ToLower(e))
 }

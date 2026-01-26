@@ -100,7 +100,7 @@ func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 	}
 
 	// Detect MIME / extension where possible.
-	mimeType, extMode, mimeErr := fileutil.MIMEForLocalFile(path)
+	mimeType, extMode, _, mimeErr := fileutil.MIMEForLocalFile(path)
 	ext := strings.ToLower(filepath.Ext(path))
 
 	isPDFByExt := ext == string(fileutil.ExtPDF)

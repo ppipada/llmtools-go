@@ -106,7 +106,7 @@ func decodeImageConfig(info *ImageData, reader io.Reader) error {
 	if err != nil {
 		return errors.New("invalid image format")
 	}
-	if modeForMIME(m) != ExtensionModeImage {
+	if GetModeForMIME(m) != ExtensionModeImage {
 		return errors.New("invalid image format")
 	}
 	info.MIMEType = m
