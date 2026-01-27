@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexigpt/llmtools-go/commandtool"
 	"github.com/flexigpt/llmtools-go/fstool"
 	"github.com/flexigpt/llmtools-go/imagetool"
 	"github.com/flexigpt/llmtools-go/internal/jsonutil"
@@ -32,11 +33,11 @@ type Registry struct {
 type RegistryOption func(*Registry) error
 
 // NewBuiltinRegistry returns a Registry with all built-in tools registered.
-// By default it applies a 5s timeout, but callers can override it by passing
+// By default it applies a 10mins timeout, but callers can override it by passing
 // WithDefaultCallTimeout as a later option.
 func NewBuiltinRegistry(opts ...RegistryOption) (*Registry, error) {
 	defaults := make([]RegistryOption, 0, 1+len(opts))
-	defaults = append(defaults, WithDefaultCallTimeout(5*time.Second))
+	defaults = append(defaults, WithDefaultCallTimeout(10*time.Minute))
 	defaults = append(defaults, opts...)
 	r, err := NewRegistry(defaults...)
 	if err != nil {
@@ -101,6 +102,9 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, imagetool.ReadImageTool(), imagetool.ReadImage); err != nil {
+		return err
+	}
+	if err := RegisterOutputsTool(r, commandtool.ShellCommandTool(), commandtool.ShellCommand); err != nil {
 		return err
 	}
 	return nil

@@ -13,6 +13,7 @@ LLM Tool implementations for Golang
 - [Quickstart](#quickstart)
   - [Registry with Built-ins](#registry-with-built-ins)
   - [Direct Tool Usage](#direct-tool-usage)
+- [Shell Tool Notes](#shell-tool-notes)
 - [Development](#development)
 - [License](#license)
 
@@ -26,7 +27,10 @@ LLM Tool implementations for Golang
     - Inspect path (`statpath`): Returns existence, size, timestamps, and directory flag.
 
   - Images (`imagetool`):
-    - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents..
+    - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents.
+
+  - Commands (`commandtool`):
+    - Execute Shell commands (`shell`): Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env. (Check notes below too).
 
 - Tool registry for:
   - collecting and listing tool manifests (stable ordering)
@@ -37,8 +41,9 @@ LLM Tool implementations for Golang
 
 - `llmtools`: Registry and registration helpers
 - `spec`: Tool manifests + IO/output schema
-- `fstool`: Filesystem tools (standalone callable)
-- `imagetool`: Image tools (standalone callable)
+- `fstool`: Filesystem tools.
+- `imagetool`: Image tools.
+- `commandtool`: Command tools.
 
 ## Installation
 
@@ -65,7 +70,7 @@ import (
 
 func main() {
     r, err := llmtools.NewBuiltinRegistry(
-        llmtools.WithCallTimeoutForAll(5), // or 5*time.Second
+        llmtools.WithCallTimeoutForAll(10*time.Minute),
     )
     if err != nil {
         panic(err)
@@ -110,6 +115,20 @@ func main() {
     fmt.Println(out.Entries)
 }
 ```
+
+## Shell Tool Notes
+
+- OS support:
+  - Uses Go build constraints (`windows` / `!windows`) to select process-group handling.
+  - No consumer build tags are required.
+
+- Timeouts:
+  - `commandtool.ShellCommand` enforces its own per-command timeout via `timeoutMS`.
+  - If you also set a registry-level timeout (`WithDefaultCallTimeout` or `WithCallTimeout`),
+    ensure it is >= the tool timeout or set it to 0 to avoid early cancellation.
+
+- Policy knobs:
+  - Hosts can tune `commandtool.DefaultShellCommandPolicy` (set once at startup; treat it as immutable after concurrent use).
 
 ## Development
 
