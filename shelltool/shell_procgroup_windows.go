@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 func configureProcessGroup(cmd *exec.Cmd) {
@@ -22,7 +23,11 @@ func killProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	// Best-effort: kill process tree. Taskkill is available on Windows.
-	_ = exec.CommandContext(context.Background(), "taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run()
+	pid := strconv.Itoa(cmd.Process.Pid)
+	// Try a soft termination first (no /F), then force.
+	_ = exec.CommandContext(context.Background(), "taskkill", "/T", "/PID", pid).Run()
+	time.Sleep(250 * time.Millisecond)
+	_ = exec.CommandContext(context.Background(), "taskkill", "/T", "/F", "/PID", pid).Run()
 }
 
 func exitCodeFromProcessState(ps *os.ProcessState) int {

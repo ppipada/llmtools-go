@@ -20,27 +20,27 @@ var searchFilesTool = spec.Tool{
 	Tags:          []string{"fs", "search"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type": "object",
-		"properties": {
-			"root": {
-				"type": "string",
-				"description": "Directory to start searching from.",
-				"default": "."
-			},
-			"pattern": {
-				"type": "string",
-				"description": "RE2 regular expression applied to file path and file content."
-			},
-			"maxResults": {
-				"type": "integer",
-				"description": "Stop after this many matches (0 = unlimited).",
-				"default": 100
-			}
-		},
-		"required": ["pattern"],
-		"additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"root": {
+		"type": "string",
+		"description": "Directory to start searching from.",
+		"default": "."
+	},
+	"pattern": {
+		"type": "string",
+		"description": "RE2 regular expression applied to file path and file content."
+	},
+	"maxResults": {
+		"type": "integer",
+		"description": "Stop after this many matches (0 = unlimited).",
+		"default": 100
+	}
+},
+"required": ["pattern"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: searchFilesFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

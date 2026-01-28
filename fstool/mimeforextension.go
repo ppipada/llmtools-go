@@ -22,17 +22,17 @@ var mimeForExtensionTool = spec.Tool{
 	Tags:          []string{"mime"},
 
 	ArgSchema: spec.JSONSchema(`{
-	  "$schema": "http://json-schema.org/draft-07/schema#",
-	  "type": "object",
-	  "properties": {
-	    "extension": {
-	      "type": "string",
-	      "description": "File extension (e.g. 'png' or '.png')."
-	    }
-	  },
-	  "required": ["extension"],
-	  "additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"extension": {
+		"type": "string",
+		"description": "File extension (e.g. 'png' or '.png')."
+	}
+},
+"required": ["extension"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: mimeForExtensionFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

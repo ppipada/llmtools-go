@@ -16,81 +16,20 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-func TestShellCommand_ArgValidation_MutualExclusionAndRequirements(t *testing.T) {
+func TestShellCommand_AutoSession_DoesNotLeakOnEarlyError(t *testing.T) {
 	st := newTestShellTool(t)
 
+	// Force an early validation error by omitting commands.
 	_, err := st.Run(t.Context(), ShellCommandArgs{
-		CreateSession: true,
-		SessionID:     "sess_abc",
-		Commands:      []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "createSession cannot be used") {
-		t.Fatalf("expected createSession+sessionID error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		CreateSession: true,
-		CloseSession:  true,
-		Commands:      []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "cannot both be true") {
-		t.Fatalf("expected createSession+closeSession error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		CloseSession: true,
-		Commands:     []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "cannot be used with commands") {
-		t.Fatalf("expected closeSession+commands error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		RestartSession: true,
-		Commands:       []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "sessionID is required") {
-		t.Fatalf("expected restartSession without sessionID error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		CloseSession: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "sessionID is required") {
-		t.Fatalf("expected closeSession without sessionID error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		SessionID: "sess_unknown",
-		Commands:  []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
-		t.Fatalf("expected unknown sessionID error, got: %v", err)
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{})
-	if err == nil || !strings.Contains(err.Error(), "commands is required") {
-		t.Fatalf("expected commands required error, got: %v", err)
-	}
-}
-
-func TestShellCommand_CreateSession_CleansUpOnLaterError(t *testing.T) {
-	st := newTestShellTool(t)
-
-	// Force an error after session creation by omitting commands.
-	_, err := st.Run(t.Context(), ShellCommandArgs{
-		CreateSession: true,
-		Commands:      nil,
+		Commands: nil,
 	})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
 
 	// Ensure no leaked session.
-	st.sessions.mu.RLock()
-	defer st.sessions.mu.RUnlock()
-	if len(st.sessions.m) != 0 {
-		t.Fatalf("expected no sessions left, found %d", len(st.sessions.m))
+	if got := st.sessions.sizeForTest(); got != 0 {
+		t.Fatalf("expected no sessions left, found %d", got)
 	}
 }
 
@@ -107,48 +46,33 @@ func TestNormalizedCommandList(t *testing.T) {
 	}
 }
 
-func TestEffectiveTimeout_ClampsAndDefaults(t *testing.T) {
-	p := DefaultShellCommandPolicy
-	p.DefaultTimeout = 1500 * time.Millisecond
-
-	if got := effectiveTimeout(p, nil); got != 1500*time.Millisecond {
-		t.Fatalf("expected default timeout 1500ms, got %v", got)
+func TestPolicy_EffectiveTimeout_UsesDefaultAndClampsToHardMax(t *testing.T) {
+	p := ShellCommandPolicy{}
+	if got := effectiveTimeout(p); got != DefaultTimeout {
+		t.Fatalf("expected DefaultTimeout=%v got %v", DefaultTimeout, got)
 	}
 
-	neg := int64(-5)
-	if got := effectiveTimeout(p, &neg); got != 1500*time.Millisecond {
-		t.Fatalf("expected default timeout for negative, got %v", got)
-	}
-
-	// Hard max is 10 min.
-	big := (11 * time.Minute).Milliseconds()
-	if got := effectiveTimeout(p, &big); got != 10*time.Minute {
-		t.Fatalf("expected hard max 10m, got %v", got)
+	p.Timeout = 999 * time.Hour
+	if got := effectiveTimeout(p); got != HardMaxTimeout {
+		t.Fatalf("expected clamp to HardMaxTimeout=%v got %v", HardMaxTimeout, got)
 	}
 }
 
-func TestEffectiveMaxOutputBytes_ClampsAndDefaults(t *testing.T) {
-	p := DefaultShellCommandPolicy
-	p.DefaultMaxOutputBytes = 2048
-	p.HardMaxOutputBytes = 4096
-
-	if got := effectiveMaxOutputBytes(p, nil); got != 2048 {
-		t.Fatalf("expected default 2048, got %d", got)
+func TestPolicy_EffectiveMaxOutputBytes_UsesDefaultAndClamps(t *testing.T) {
+	p := ShellCommandPolicy{}
+	if got := effectiveMaxOutputBytes(p); got != DefaultMaxOutputBytes {
+		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", DefaultMaxOutputBytes, got)
 	}
 
-	zero := int64(0)
-	if got := effectiveMaxOutputBytes(p, &zero); got != 2048 {
-		t.Fatalf("expected default for 0, got %d", got)
+	p.MaxOutputBytes = 1
+	if got := effectiveMaxOutputBytes(p); got != MinOutputBytes {
+		t.Fatalf("expected clamp to MinOutputBytes=%d got %d", MinOutputBytes, got)
 	}
 
-	tooSmall := int64(1)
-	if got := effectiveMaxOutputBytes(p, &tooSmall); got != 1024 {
-		t.Fatalf("expected min clamp 1024, got %d", got)
-	}
-
-	tooBig := int64(999999)
-	if got := effectiveMaxOutputBytes(p, &tooBig); got != 4096 {
-		t.Fatalf("expected hard max clamp 4096, got %d", got)
+	p.MaxOutputBytes = 1 << 62
+	if got := effectiveMaxOutputBytes(p); got != min(HardMaxOutputBytes, int64(^uint(0)>>1)) {
+		// The implementation clamps to HardMaxOutputBytes and also to MaxInt.
+		t.Fatalf("expected clamp to hard max, got %d", got)
 	}
 }
 
@@ -241,23 +165,6 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 	}
 }
 
-func TestDeriveExecArgs_UnixLoginFlag(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
-		t.Skip("unix-specific")
-	}
-	shPath := mustLookPath(t, "sh")
-
-	sel := selectedShell{Name: ShellNameSh, Path: shPath}
-	a := deriveExecArgs(sel, "echo hi", false)
-	if len(a) < 3 || a[0] != shPath || a[1] != "-c" {
-		t.Fatalf("unexpected args for login=false: %#v", a)
-	}
-	a = deriveExecArgs(sel, "echo hi", true)
-	if len(a) < 3 || a[0] != shPath || a[1] != "-lc" {
-		t.Fatalf("unexpected args for login=true: %#v", a)
-	}
-}
-
 func TestClassifyWarnings(t *testing.T) {
 	w := classifyWarnings("curl https://example.com")
 	if !contains(w, "network_access") {
@@ -272,6 +179,29 @@ func TestClassifyWarnings(t *testing.T) {
 	w = classifyWarnings("rm -rf ./tmp")
 	if !contains(w, "potentially_destructive") {
 		t.Fatalf("expected potentially_destructive warning, got %#v", w)
+	}
+}
+
+func TestEffectiveEnv_OrderIsDeterministicNonDecreasingByCanonicalKey(t *testing.T) {
+	// We can't control all of os.Environ(), but we can assert monotonic ordering.
+	t.Setenv("ZZZ_TEST_ENV", "1")
+	t.Setenv("AAA_TEST_ENV", "2")
+
+	env, err := effectiveEnv(nil, map[string]string{"MMM_TEST_ENV": "3"})
+	if err != nil {
+		t.Fatalf("effectiveEnv error: %v", err)
+	}
+	var prev string
+	for i, kv := range env {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			t.Fatalf("bad env entry %q", kv)
+		}
+		ck := canonicalEnvKey(k)
+		if i > 0 && ck < prev {
+			t.Fatalf("env not sorted at %d: %q < %q", i, ck, prev)
+		}
+		prev = ck
 	}
 }
 
@@ -333,9 +263,6 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 	if r.Stderr != "err_msg" {
 		t.Fatalf("expected stderr=err_msg, got %q", r.Stderr)
 	}
-	if r.Login != false {
-		t.Fatalf("expected login default false, got %v", r.Login)
-	}
 	if strings.TrimSpace(r.ShellPath) == "" {
 		t.Fatalf("expected shellPath set")
 	}
@@ -378,19 +305,16 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific sleep/timeout expectations")
 	}
-	st := newTestShellTool(t)
+	p := DefaultShellCommandPolicy
+	p.Timeout = 150 * time.Millisecond
+	st := newTestShellTool(t, WithShellCommandPolicy(p))
 
-	to := int64(150) // ms
 	out, err := st.Run(t.Context(), ShellCommandArgs{
-		Shell:        ShellNameSh,
-		TimeoutMS:    &to,
-		Commands:     []string{`sleep 2`},
-		Notes:        "timeout test",
-		Login:        false,
-		SessionID:    "",
-		Workdir:      "",
-		Env:          nil,
-		CloseSession: false,
+		Shell:     ShellNameSh,
+		Commands:  []string{`sleep 2`},
+		SessionID: "",
+		Workdir:   "",
+		Env:       nil,
 	})
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
@@ -412,12 +336,13 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific sh loop expectations")
 	}
-	st := newTestShellTool(t)
+	p := DefaultShellCommandPolicy
+	p.MaxOutputBytes = 1024
+	st := newTestShellTool(t, WithShellCommandPolicy(p))
 
-	maxOut := int64(1024)
 	out, err := st.Run(t.Context(), ShellCommandArgs{
-		Shell:           ShellNameSh,
-		MaxOutputLength: &maxOut,
+		Shell: ShellNameSh,
+
 		Commands: []string{
 			// Print 3000 'a' characters using POSIX sh arithmetic.
 			`i=0; while [ $i -lt 3000 ]; do printf a; i=$((i+1)); done`,
@@ -432,11 +357,76 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if !r.StdoutTruncated {
 		t.Fatalf("expected stdout truncated")
 	}
-	if got := int64(len(r.Stdout)); got != maxOut {
-		t.Fatalf("expected captured stdout len=%d, got %d", maxOut, got)
+	if got := int64(len(r.Stdout)); got != 1024 {
+		t.Fatalf("expected captured stdout len=1024, got %d", got)
 	}
-	if r.StdoutBytes <= maxOut {
-		t.Fatalf("expected stdoutBytes > maxOut (%d), got %d", maxOut, r.StdoutBytes)
+	if r.StdoutBytes <= 1024 {
+		t.Fatalf("expected stdoutBytes > %d, got %d", 1024, r.StdoutBytes)
+	}
+}
+
+func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
+	if runtime.GOOS == GOOSWindows {
+		t.Skip("unix-specific")
+	}
+	st := newTestShellTool(t)
+
+	out, err := st.Run(t.Context(), ShellCommandArgs{
+		Shell: ShellNameSh,
+		Commands: []string{
+			`exit 7`,
+			`echo should_not_run`,
+		},
+		ExecuteParallel: false,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	resp := decodeShellResponse(t, out)
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected 1 result due to stop-on-error, got %d", len(resp.Results))
+	}
+	if resp.Results[0].ExitCode != 7 {
+		t.Fatalf("expected exitCode=7 got %d", resp.Results[0].ExitCode)
+	}
+}
+
+func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testing.T) {
+	if runtime.GOOS == GOOSWindows {
+		t.Skip("unix-specific")
+	}
+	st := newTestShellTool(t)
+
+	out, err := st.Run(t.Context(), ShellCommandArgs{
+		Shell: ShellNameSh,
+		Commands: []string{
+			`exit 7`,
+			`echo ok`,
+		},
+		ExecuteParallel: true,
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	resp := decodeShellResponse(t, out)
+	if len(resp.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(resp.Results))
+	}
+	if resp.Results[0].ExitCode != 7 {
+		t.Fatalf("expected first exitCode=7 got %d", resp.Results[0].ExitCode)
+	}
+	if strings.TrimSpace(resp.Results[1].Stdout) != "ok" {
+		t.Fatalf("expected second stdout=ok, got %q", resp.Results[1].Stdout)
+	}
+}
+
+func TestShellCommand_RejectsNULInCommand(t *testing.T) {
+	st := newTestShellTool(t)
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{"echo hi\x00there"},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "nul") {
+		t.Fatalf("expected NUL error, got %v", err)
 	}
 }
 
@@ -458,6 +448,87 @@ func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
 	}
 }
 
+func TestShellCommand_MaxCommands_PolicyLimit(t *testing.T) {
+	st := newTestShellTool(t, WithShellCommandPolicy(ShellCommandPolicy{
+		MaxCommands: 1,
+	}))
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{"echo a", "echo b"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "too many commands") {
+		t.Fatalf("expected too many commands error, got %v", err)
+	}
+}
+
+func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
+	st := newTestShellTool(t, WithShellCommandPolicy(ShellCommandPolicy{
+		MaxCommandLength: 5,
+	}))
+	_, err := st.Run(t.Context(), ShellCommandArgs{
+		Commands: []string{"echo_12345"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "command too long") {
+		t.Fatalf("expected command too long error, got %v", err)
+	}
+}
+
+func TestSessions_TTL_Evicts(t *testing.T) {
+	if runtime.GOOS == GOOSWindows {
+		t.Skip("timing tests may be flaky on some windows CI")
+	}
+	st := newTestShellTool(t,
+		WithShellSessionTTL(150*time.Millisecond),
+		WithShellMaxSessions(100),
+	)
+
+	out, err := st.Run(t.Context(), ShellCommandArgs{
+		Shell:    ShellNameSh,
+		Commands: []string{"echo hi"},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	resp := decodeShellResponse(t, out)
+	if resp.SessionID == "" {
+		t.Fatalf("expected session id")
+	}
+
+	time.Sleep(250 * time.Millisecond)
+
+	_, err = st.Run(t.Context(), ShellCommandArgs{
+		SessionID: resp.SessionID,
+		Shell:     ShellNameSh,
+		Commands:  []string{"echo hi"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
+		t.Fatalf("expected unknown sessionID after TTL eviction, got %v", err)
+	}
+}
+
+func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
+	st := newTestShellTool(t, WithShellMaxSessions(1))
+
+	out1, err := st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo a"}})
+	if err != nil {
+		t.Fatalf("Run1 error: %v", err)
+	}
+	sid1 := decodeShellResponse(t, out1).SessionID
+
+	out2, err := st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
+	if err != nil {
+		t.Fatalf("Run2 error: %v", err)
+	}
+	_ = decodeShellResponse(t, out2).SessionID
+
+	_, err = st.Run(t.Context(), ShellCommandArgs{
+		SessionID: sid1,
+		Commands:  []string{"echo should_fail"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
+		t.Fatalf("expected unknown sessionID after LRU eviction, got %v", err)
+	}
+}
+
 func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testing.T) {
 	if runtime.GOOS == GOOSWindows {
 		t.Skip("unix-specific")
@@ -468,14 +539,13 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 
 	// 1) Create session, set workdir and env, and run "pwd".
 	out, err := st.Run(t.Context(), ShellCommandArgs{
-		CreateSession: true,
-		Shell:         ShellNameSh,
-		Workdir:       td,
-		Env:           map[string]string{"FOO": "bar"},
-		Commands:      []string{"pwd"},
+		Shell:    ShellNameSh,
+		Workdir:  td,
+		Env:      map[string]string{"FOO": "bar"},
+		Commands: []string{"pwd"},
 	})
 	if err != nil {
-		t.Fatalf("ShellCommand(createSession) error: %v", err)
+		t.Fatalf("ShellCommand(auto session) error: %v", err)
 	}
 	resp := decodeShellResponse(t, out)
 
@@ -540,56 +610,26 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("expected FOO=baz persisted, got %q", resp.Results[0].Stdout)
 	}
 
-	// 4) Restart session: clears workdir/env; should fall back to process cwd.
+	// 4) Start a NEW session by omitting sessionID; should not inherit prior session's workdir/env.
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	out, err = st.Run(t.Context(), ShellCommandArgs{
-		SessionID:      sid,
-		RestartSession: true,
-		Shell:          ShellNameSh,
-		Commands:       []string{"pwd; printf '%s' \"$FOO\""},
+		Shell:    ShellNameSh,
+		Commands: []string{"pwd; printf '%s' \"$FOO\""},
 	})
 	if err != nil {
-		t.Fatalf("ShellCommand(restartSession) error: %v", err)
+		t.Fatalf("ShellCommand(new session) error: %v", err)
 	}
 	resp = decodeShellResponse(t, out)
 	if filepath.Clean(resp.Workdir) != filepath.Clean(cwd) {
-		t.Fatalf("expected workdir reset to cwd=%q, got %q", cwd, resp.Workdir)
+		t.Fatalf("expected new session workdir reset to cwd=%q, got %q", cwd, resp.Workdir)
 	}
 	// After restart, FOO should be empty (unless inherited from process env; to avoid flake,
 	// assert only that it is not "baz").
 	if strings.Contains(resp.Results[0].Stdout, "baz") {
-		t.Fatalf("expected FOO cleared (not baz), got stdout=%q", resp.Results[0].Stdout)
-	}
-
-	// 5) Close session; should return message and then be unusable.
-	out, err = st.Run(t.Context(), ShellCommandArgs{
-		SessionID:      sid,
-		CloseSession:   true,
-		Commands:       nil,
-		Shell:          ShellNameSh,
-		RestartSession: false,
-	})
-	if err != nil {
-		t.Fatalf("ShellCommand(closeSession) error: %v", err)
-	}
-	resp = decodeShellResponse(t, out)
-	if !strings.Contains(resp.Message, "session closed") {
-		t.Fatalf("expected session closed message, got %q", resp.Message)
-	}
-	if len(resp.Results) != 0 {
-		t.Fatalf("expected no results on closeSession, got %d", len(resp.Results))
-	}
-
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		SessionID: sid,
-		Shell:     ShellNameSh,
-		Commands:  []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
-		t.Fatalf("expected unknown sessionID after close, got: %v", err)
+		t.Fatalf("expected new session not to have baz, got stdout=%q", resp.Results[0].Stdout)
 	}
 }
 

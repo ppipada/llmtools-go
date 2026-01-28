@@ -21,17 +21,17 @@ var statPathTool = spec.Tool{
 	Tags:          []string{"fs", "stat"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type": "object",
-		"properties": {
-			"path": {
-				"type": "string",
-				"description": "Absolute or relative path to inspect."
-			}
-		},
-		"required": ["path"],
-		"additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"path": {
+		"type": "string",
+		"description": "Absolute or relative path to inspect."
+	}
+},
+"required": ["path"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: statPathFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

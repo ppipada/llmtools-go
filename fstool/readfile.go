@@ -27,23 +27,23 @@ var readFileTool = spec.Tool{
 	Tags:          []string{"fs", "read"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type": "object",
-		"properties": {
-			"path": {
-				"type": "string",
-				"description": "Absolute or relative path of the file to read."
-			},
-			"encoding": {
-				"type": "string",
-				"enum": ["text", "binary"],
-				"description": "Return mode: \"text\" reads file as UTF-8, \"binary\" returns base64 string.",
-				"default": "text"
-			}
-		},
-		"required": ["path"],
-		"additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"path": {
+		"type": "string",
+		"description": "Absolute or relative path of the file to read."
+	},
+	"encoding": {
+		"type": "string",
+		"enum": ["text", "binary"],
+		"description": "Return mode: \"text\" reads file as UTF-8, \"binary\" returns base64 string.",
+		"default": "text"
+	}
+},
+"required": ["path"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: readFileFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

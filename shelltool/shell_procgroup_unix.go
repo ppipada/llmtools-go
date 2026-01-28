@@ -3,9 +3,11 @@
 package shelltool
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 func configureProcessGroup(cmd *exec.Cmd) {
@@ -18,7 +20,29 @@ func killProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	// Negative PID targets the process group.
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+	pgid := -cmd.Process.Pid
+
+	// Best-effort graceful shutdown first.
+	_ = syscall.Kill(pgid, syscall.SIGTERM)
+
+	// Short grace period, then SIGKILL if still alive.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		// Signal 0: check existence.
+		err := syscall.Kill(pgid, 0)
+		if err == nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		// ESRCH => no such process group => already gone.
+		if errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		// Any other error: break and try SIGKILL.
+		break
+	}
+	_ = syscall.Kill(pgid, syscall.SIGKILL)
 }
 
 func exitCodeFromProcessState(ps *os.ProcessState) int {

@@ -20,22 +20,22 @@ var listDirectoryTool = spec.Tool{
 	Tags:          []string{"fs", "list"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type": "object",
-		"properties": {
-			"path": {
-				"type": "string",
-				"description": "Directory path to list.",
-				"default": "."
-			},
-			"pattern": {
-				"type": "string",
-				"description": "Optional glob pattern (e.g. \"*.txt\") to filter results."
-			}
-		},
-		"required": [],
-		"additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"path": {
+		"type": "string",
+		"description": "Directory path to list.",
+		"default": "."
+	},
+	"pattern": {
+		"type": "string",
+		"description": "Optional glob pattern (e.g. \"*.txt\") to filter results."
+	}
+},
+"required": [],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: listDirectoryFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,92 +27,66 @@ const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/shelltoo
 
 const GOOSWindows = "windows"
 
+// Fixed, package-wide hard limits (single source of truth).
+const (
+	HardMaxTimeout             = 10 * time.Minute
+	HardMaxOutputBytes   int64 = 4 * 1024 * 1024 // per stream
+	HardMaxCommands            = 64
+	HardMaxCommandLength       = 64 * 1024 // bytes
+	MinOutputBytes       int64 = 1024
+
+	DefaultTimeout                = 60 * time.Second
+	DefaultMaxOutputBytes   int64 = 256 * 1024
+	DefaultMaxCommands            = 64
+	DefaultMaxCommandLength       = 64 * 1024
+)
+
 var shellToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "019bfeda-33f2-7315-9007-de55935d2302",
 	Slug:          "shell",
 	Version:       "v1.0.0",
 	DisplayName:   "Shell",
-	Description:   "Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env.",
+	Description:   "Execute local shell commands (cross-platform) with session-like persistence for workdir/env.",
 	Tags:          []string{"shell", "exec", "cli"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"commands": {
+		"type": "array",
+		"items": { "type": "string" },
+		"description": "List of commands to execute sequentially. Prefer setting workdir rather than using 'cd'."
+	},
+	"workdir": {
+		"type": "string",
+		"description": "Working directory to execute in. If omitted and sessionID is used, uses the session workdir; otherwise uses current process directory."
+	},
+	"env": {
 		"type": "object",
-		"properties": {
-			"commands": {
-				"type": "array",
-				"items": { "type": "string" },
-				"description": "List of commands to execute sequentially. Prefer setting workdir rather than using 'cd'."
-			},
-			"workdir": {
-				"type": "string",
-				"description": "Working directory to execute in. If omitted and sessionID is used, uses the session workdir; otherwise uses current process directory."
-			},
-			"env": {
-				"type": "object",
-				"additionalProperties": { "type": "string" },
-				"description": "Environment variable overrides (merged into the process env)."
-			},
-			"shell": {
-				"type": "string",
-				"enum": ["auto", "bash", "zsh", "sh", "powershell", "cmd"],
-				"default": "auto",
-				"description": "Which shell to run. 'auto' chooses a safe default per OS."
-			},
-			"continueOnError": {
-				"type": "boolean",
-				"default": false,
-				"description": "If true, continue executing subsequent commands after a non-zero exit code or timeout."
-			},
-			"login": {
-				"type": "boolean",
-				"default": false,
-				"description": "If true, run with login/profile semantics (e.g., bash -lc). Default false for determinism & safety."
-			},
-			"timeoutMS": {
-				"type": "integer",
-				"minimum": 1,
-				"maximum": 600000,
-				"default": 60000,
-				"description": "Timeout per command in milliseconds."
-			},
-			"maxOutputLength": {
-				"type": "integer",
-				"minimum": 1024,
-				"maximum": 4194304,
-				"default": 262144,
-				"description": "Max bytes captured for stdout/stderr each. Output beyond this is discarded (but the process continues)."
-			},
-
-			"sessionID": {
-				"type": "string",
-				"default": "",
-				"description": "Optional session identifier. Sessions persist workdir and env across calls (not a persistent shell process)."
-			},
-			"createSession": {
-				"type": "boolean",
-				"default": false,
-				"description": "If true, create a new session and return its sessionID."
-			},
-			"restartSession": {
-				"type": "boolean",
-				"default": false,
-				"description": "If true, reset the session state (workdir/env) before running commands."
-			},
-			"closeSession": {
-				"type": "boolean",
-				"default": false,
-				"description": "If true, delete the session and do not run any commands."
-			},
-
-			"notes": {
-				"type": "string",
-				"description": "Optional audit notes. Not executed."
-			}
-		},
-		"additionalProperties": false
-	}`),
+		"additionalProperties": { "type": "string" },
+		"description": "Environment variable overrides (merged into the process env)."
+	},
+	"shell": {
+		"type": "string",
+		"enum": ["auto", "bash", "zsh", "sh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd"],
+		"default": "auto",
+		"description": "Which shell to run. 'auto' chooses a safe default per OS."
+	},
+	"executeParallel": {
+		"type": "boolean",
+		"default": false,
+		"description": "If true, treat commands as independent and parallel executable (do not stop on error)."
+	},
+	"sessionID": {
+		"type": "string",
+		"default": "",
+		"description": "Optional session identifier. If omitted/empty, a new session is created and returned. Sessions persist workdir and env across calls (not a persistent shell process)."
+	}
+},
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: shellCommandFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
@@ -124,6 +100,10 @@ const (
 	ShellNameBash       ShellName = "bash"
 	ShellNameZsh        ShellName = "zsh"
 	ShellNameSh         ShellName = "sh"
+	ShellNameDash       ShellName = "dash"
+	ShellNameKsh        ShellName = "ksh"
+	ShellNameFish       ShellName = "fish"
+	ShellNamePwsh       ShellName = "pwsh"
 	ShellNamePowershell ShellName = "powershell"
 	ShellNameCmd        ShellName = "cmd"
 )
@@ -134,25 +114,12 @@ type selectedShell struct {
 }
 
 type ShellCommandArgs struct {
-	Commands []string `json:"commands,omitempty"`
-
-	Workdir string            `json:"workdir,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-
-	Shell           ShellName `json:"shell,omitempty"`
-	ContinueOnError bool      `json:"continueOnError,omitempty"`
-	Login           bool      `json:"login,omitempty"`
-	TimeoutMS       *int64    `json:"timeoutMS,omitempty"`
-
-	// In bytes, per stream (stdout and stderr each).
-	MaxOutputLength *int64 `json:"maxOutputLength,omitempty"`
-
-	SessionID      string `json:"sessionID,omitempty"`
-	CreateSession  bool   `json:"createSession,omitempty"`
-	RestartSession bool   `json:"restartSession,omitempty"`
-	CloseSession   bool   `json:"closeSession,omitempty"`
-
-	Notes string `json:"notes,omitempty"`
+	Commands        []string          `json:"commands,omitempty"`
+	Workdir         string            `json:"workdir,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	Shell           ShellName         `json:"shell,omitempty"`
+	ExecuteParallel bool              `json:"executeParallel,omitempty"`
+	SessionID       string            `json:"sessionID,omitempty"`
 }
 
 type ShellCommandExecResult struct {
@@ -160,7 +127,6 @@ type ShellCommandExecResult struct {
 	Workdir   string    `json:"workdir"`
 	Shell     ShellName `json:"shell"`
 	ShellPath string    `json:"shellPath"`
-	Login     bool      `json:"login"`
 
 	ExitCode   int   `json:"exitCode"`
 	TimedOut   bool  `json:"timedOut"`
@@ -178,15 +144,9 @@ type ShellCommandExecResult struct {
 }
 
 type ShellCommandResponse struct {
-	SessionID string `json:"sessionID,omitempty"`
-	Workdir   string `json:"workdir,omitempty"`
-
-	MaxOutputLength int64 `json:"maxOutputLength"`
-	TimeoutMS       int64 `json:"timeoutMS"`
-
-	Results []ShellCommandExecResult `json:"results,omitempty"`
-	Message string                   `json:"message,omitempty"`
-	Notes   string                   `json:"notes,omitempty"`
+	SessionID string                   `json:"sessionID,omitempty"`
+	Workdir   string                   `json:"workdir,omitempty"`
+	Results   []ShellCommandExecResult `json:"results,omitempty"`
 }
 
 // ShellCommandPolicy provides policy / hardening knobs (package-level, so host app can tune).
@@ -194,23 +154,19 @@ type ShellCommandPolicy struct {
 	// If true, skip dangerous-command checks (NOT recommended as default).
 	AllowDangerous bool
 
-	// Default caps.
-	DefaultTimeout        time.Duration
-	DefaultMaxOutputBytes int64
-
-	// Maximum cap allowed even if caller requests more.
-	HardMaxOutputBytes   int64
-	HardMaxCommands      int
-	HardMaxCommandLength int
+	// Policy limits (clamped to package hard limits).
+	Timeout          time.Duration
+	MaxOutputBytes   int64
+	MaxCommands      int
+	MaxCommandLength int
 }
 
 var DefaultShellCommandPolicy = ShellCommandPolicy{
-	AllowDangerous:        false,
-	DefaultTimeout:        60 * time.Second,
-	DefaultMaxOutputBytes: 256 * 1024,      // 256KiB per stream
-	HardMaxOutputBytes:    4 * 1024 * 1024, // 4MiB per stream
-	HardMaxCommands:       64,
-	HardMaxCommandLength:  64 * 1024, // 64KiB
+	AllowDangerous:   false,
+	Timeout:          DefaultTimeout,
+	MaxOutputBytes:   DefaultMaxOutputBytes,
+	MaxCommands:      DefaultMaxCommands,
+	MaxCommandLength: DefaultMaxCommandLength,
 }
 
 // ShellTool is an instance-owned shell tool runner.
@@ -240,6 +196,24 @@ func WithShellAllowedWorkdirRoots(roots []string) ShellToolOption {
 			return err
 		}
 		st.allowedWorkdirRoots = canon
+		return nil
+	}
+}
+
+// WithShellSessionTTL enables TTL eviction for sessions.
+// "ttl<=0" disables TTL eviction (LRU max may still evict).
+func WithShellSessionTTL(ttl time.Duration) ShellToolOption {
+	return func(st *ShellTool) error {
+		st.sessions.setTTL(ttl)
+		return nil
+	}
+}
+
+// WithShellMaxSessions sets an upper bound on concurrent sessions (LRU eviction).
+// "max<=0" disables max-session eviction (TTL may still evict).
+func WithShellMaxSessions(maxSessions int) ShellToolOption {
+	return func(st *ShellTool) error {
+		st.sessions.setMaxSessions(maxSessions)
 		return nil
 	}
 }
@@ -282,21 +256,21 @@ func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec
 	}
 
 	args.SessionID = strings.TrimSpace(args.SessionID)
-	// Validate mutually exclusive combinations.
-	if args.CreateSession && args.SessionID != "" {
-		return nil, errors.New("createSession cannot be used with an explicit sessionID")
-	}
-	if args.CreateSession && args.CloseSession {
-		return nil, errors.New("createSession and closeSession cannot both be true")
-	}
-	if args.CloseSession && len(args.Commands) != 0 {
-		return nil, errors.New("closeSession=true cannot be used with commands")
-	}
 
 	st.mu.RLock()
 	policy := st.policy
 	roots := append([]string(nil), st.allowedWorkdirRoots...)
 	st.mu.RUnlock()
+
+	// Determine commands early (so we don't create sessions for invalid requests).
+	cmds := normalizedCommandList(args)
+	if len(cmds) == 0 {
+		return nil, errors.New("commands is required")
+	}
+	maxCmds := effectiveMaxCommands(policy)
+	if maxCmds > 0 && len(cmds) > maxCmds {
+		return nil, fmt.Errorf("too many commands: %d (max %d)", len(cmds), maxCmds)
+	}
 
 	createdSessionID := ""
 	defer func() {
@@ -308,56 +282,28 @@ func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec
 
 	// Handle session lifecycle first.
 	var sess *shellSession
-	if args.CreateSession {
-		sess = st.sessions.newSession()
-
-		args.SessionID = sess.id
-		createdSessionID = sess.id
-
-	}
-	if args.SessionID != "" && sess == nil {
+	// Session semantics:
+	// - if sessionID provided: use it
+	// - otherwise: create a new session and return it.
+	if args.SessionID != "" {
 		var ok bool
 		sess, ok = st.sessions.get(args.SessionID)
-
 		if !ok {
 			return nil, fmt.Errorf("unknown sessionID: %s", args.SessionID)
 		}
-		if args.RestartSession {
-			st.sessions.reset(sess)
-		}
-		if args.CloseSession {
-			st.sessions.delete(args.SessionID)
-
-			resp := ShellCommandResponse{
-				SessionID:       args.SessionID,
-				Message:         "session closed",
-				Notes:           args.Notes,
-				MaxOutputLength: effectiveMaxOutputBytes(policy, args.MaxOutputLength),
-				TimeoutMS:       effectiveTimeout(policy, args.TimeoutMS).Milliseconds(),
-			}
-			out, err = toolJSONText(resp)
-			return out, err
-		}
-	} else if args.CloseSession || args.RestartSession {
-		return nil, errors.New("sessionID is required for closeSession/restartSession")
+	} else {
+		sess = st.sessions.newSession()
+		args.SessionID = sess.id
+		createdSessionID = sess.id
 	}
 
-	// Determine commands.
-	cmds := normalizedCommandList(args)
-	if len(cmds) == 0 {
-		return nil, errors.New("commands is required (unless closeSession=true)")
-	}
+	// Determine effective settings (policy-only).
+	timeout := effectiveTimeout(policy)
+	maxOut := effectiveMaxOutputBytes(policy)
+	maxCmdLen := effectiveMaxCommandLength(policy)
 
-	if policy.HardMaxCommands > 0 && len(cmds) > policy.HardMaxCommands {
-		return nil, fmt.Errorf("too many commands: %d (max %d)", len(cmds), policy.HardMaxCommands)
-	}
-	// Determine effective settings.
-	timeout := effectiveTimeout(policy, args.TimeoutMS)
-	maxOut := effectiveMaxOutputBytes(policy, args.MaxOutputLength)
-
-	login := args.Login
-
-	stopOnError := !args.ContinueOnError
+	// "executeParallel=true" => treat commands as independent => do not stop on error.
+	stopOnError := !args.ExecuteParallel
 
 	// Determine effective workdir (args > session > current).
 	workdir, err := effectiveWorkdir(args.Workdir, sess, roots)
@@ -435,12 +381,10 @@ func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec
 		if command == "" {
 			continue
 		}
-		if policy.HardMaxCommandLength > 0 &&
-			len(command) > policy.HardMaxCommandLength {
+		if maxCmdLen > 0 && len(command) > maxCmdLen {
 			return nil, fmt.Errorf(
 				"command too long (%d bytes; max %d)",
-				len(command),
-				policy.HardMaxCommandLength,
+				len(command), maxCmdLen,
 			)
 		}
 		if strings.ContainsRune(command, '\x00') {
@@ -455,16 +399,16 @@ func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec
 			}
 		}
 
-		res, err := runOne(ctx, sel, command, workdir, env, login, timeout, maxOut, warnings)
+		res, err := runOne(ctx, sel, command, workdir, env, timeout, maxOut, warnings)
 		if err != nil {
 			// We still return structured output when possible.
 			// If it's an exec-start failure, include it in stderr-ish form.
 			res = ShellCommandExecResult{
-				Command:     command,
-				Workdir:     workdir,
-				Shell:       sel.Name,
-				ShellPath:   sel.Path,
-				Login:       login,
+				Command:   command,
+				Workdir:   workdir,
+				Shell:     sel.Name,
+				ShellPath: sel.Path,
+
 				ExitCode:    127,
 				TimedOut:    false,
 				DurationMS:  0,
@@ -482,12 +426,9 @@ func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec
 	}
 
 	resp := ShellCommandResponse{
-		SessionID:       args.SessionID,
-		Workdir:         workdir,
-		MaxOutputLength: maxOut,
-		TimeoutMS:       timeout.Milliseconds(),
-		Results:         results,
-		Notes:           args.Notes,
+		SessionID: args.SessionID,
+		Workdir:   workdir,
+		Results:   results,
 	}
 
 	out, err = toolJSONText(resp)
@@ -500,7 +441,6 @@ func runOne(
 	command string,
 	workdir string,
 	env []string,
-	login bool,
 	timeout time.Duration,
 	maxOut int64,
 	warnings []string,
@@ -512,7 +452,7 @@ func runOne(
 		defer cancel()
 	}
 
-	args := deriveExecArgs(sel, command, login)
+	args := deriveExecArgs(sel, command)
 
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // Exec shell command.
 	cmd.Dir = workdir
@@ -525,35 +465,39 @@ func runOne(
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
-	done := make(chan struct{})
-
 	start := time.Now()
 	runErr := cmd.Start()
 	if runErr != nil {
 		return ShellCommandExecResult{}, runErr
 	}
 
-	// Kill process group/tree immediately on ctx cancellation/timeout to avoid orphaned grandchildren.
+	// Wait in a goroutine so we can react to ctx cancellation/timeouts.
+	waitCh := make(chan error, 1)
 	go func() {
-		select {
-		case <-ctx.Done():
-			// Double-check completion so we don't kill after the process has already been waited/reaped.
-			select {
-			case <-done:
-				return
-			default:
-			}
-			killProcessGroup(cmd)
-		case <-done:
-		}
+		waitCh <- cmd.Wait()
 	}()
 
-	waitErr := cmd.Wait()
-	close(done)
+	killedByCtx := false
+	var waitErr error
+
+	select {
+	case waitErr = <-waitCh:
+		// Process completed before context cancellation/timeout.
+	case <-ctx.Done():
+		// If process already finished, do not kill.
+		select {
+		case waitErr = <-waitCh:
+			// Finished.
+		default:
+			killedByCtx = true
+			killProcessGroup(cmd)
+			waitErr = <-waitCh
+		}
+	}
 	dur := time.Since(start)
 
-	ctxErr := ctx.Err()
-	timedOut := errors.Is(ctxErr, context.DeadlineExceeded)
+	// Only mark timed out if we actually killed because ctx fired due to deadline.
+	timedOut := killedByCtx && errors.Is(ctx.Err(), context.DeadlineExceeded)
 
 	exitCode := exitCodeFromWait(waitErr, timedOut)
 
@@ -562,7 +506,6 @@ func runOne(
 		Workdir:   workdir,
 		Shell:     sel.Name,
 		ShellPath: sel.Path,
-		Login:     login,
 
 		ExitCode:   exitCode,
 		TimedOut:   timedOut,
@@ -581,7 +524,7 @@ func runOne(
 }
 
 func exitCodeFromWait(waitErr error, timedOut bool) int {
-	if timedOut {
+	if timedOut && waitErr != nil {
 		return 124 // conventional timeout exit code
 	}
 	if waitErr == nil {
@@ -624,10 +567,17 @@ type cappedWriter struct {
 }
 
 func newCappedWriter(capBytes int64) *cappedWriter {
-	if capBytes < 1024 {
-		capBytes = 1024
+	if capBytes < MinOutputBytes {
+		capBytes = MinOutputBytes
 	}
-	// "capBytes" is bounded by policy hard-max (<= 4MiB), safe to cast to int.
+	if capBytes > HardMaxOutputBytes {
+		capBytes = HardMaxOutputBytes
+	}
+
+	// Avoid int overflow / huge allocations even if misconfigured.
+	if capBytes > int64(math.MaxInt) {
+		capBytes = int64(math.MaxInt)
+	}
 	cb := int(capBytes)
 	return &cappedWriter{
 		capBytes: cb,
@@ -703,29 +653,6 @@ func (w *cappedWriter) Truncated() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.truncated
-}
-
-func effectiveTimeout(policy ShellCommandPolicy, ms *int64) time.Duration {
-	// Tool schema max is 10 minutes; clamp even if caller bypassed schema validation.
-	const hardMax = 10 * time.Minute
-	if ms == nil || *ms <= 0 {
-		d := max(policy.DefaultTimeout, 0)
-		return min(d, hardMax)
-	}
-	maxMS := int64(hardMax / time.Millisecond)
-	if *ms >= maxMS {
-		return hardMax
-	}
-	return time.Duration(*ms) * time.Millisecond
-}
-
-func effectiveMaxOutputBytes(policy ShellCommandPolicy, v *int64) int64 {
-	hardMax := max(policy.HardMaxOutputBytes, 1024)
-	def := max(policy.DefaultMaxOutputBytes, 1024)
-	if v == nil || *v <= 0 {
-		return min(def, hardMax)
-	}
-	return min(max(*v, 1024), hardMax)
 }
 
 func normalizedCommandList(args ShellCommandArgs) []string {
@@ -914,8 +841,17 @@ func effectiveEnv(sess *shellSession, overrides map[string]string) ([]string, er
 		}
 	}
 
-	out := make([]string, 0, len(envMap))
+	// Stable ordering (deterministic across runs).
+	entries := make([]envEntry, 0, len(envMap))
 	for _, e := range envMap {
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		// Compare canonical keys for stable ordering across Windows/unix.
+		return canonicalEnvKey(entries[i].key) < canonicalEnvKey(entries[j].key)
+	})
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
 		out = append(out, e.key+"="+e.val)
 	}
 	return out, nil
@@ -965,7 +901,7 @@ func selectShell(requested ShellName) (selectedShell, error) {
 	if runtime.GOOS == GOOSWindows {
 		// Prefer pwsh, then Windows PowerShell, then cmd.
 		if p, _ := exec.LookPath("pwsh"); p != "" {
-			return selectedShell{Name: ShellNamePowershell, Path: p}, nil
+			return selectedShell{Name: ShellNamePwsh, Path: p}, nil
 		}
 		if p, _ := exec.LookPath("powershell"); p != "" {
 			return selectedShell{Name: ShellNamePowershell, Path: p}, nil
@@ -982,15 +918,10 @@ func selectShell(requested ShellName) (selectedShell, error) {
 			// Best-effort: infer by basename.
 			base := ShellName(strings.ToLower(filepath.Base(p)))
 			switch base {
-			case ShellNameBash, ShellNameZsh, ShellNameSh:
+			case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
 				return selectedShell{Name: base, Path: p}, nil
 			default:
-				// Allow a small set of common shells that typically support "-c" even though
-				// they aren't explicitly in our enum. Keep Name=auto for transparency.
-				switch strings.ToLower(string(base)) {
-				case "dash", "ksh", "fish":
-					return selectedShell{Name: ShellNameAuto, Path: p}, nil
-				}
+				// Need to explicitly try what we support.
 			}
 		}
 	}
@@ -1004,22 +935,37 @@ func selectShell(requested ShellName) (selectedShell, error) {
 	if p, _ := exec.LookPath(string(ShellNameSh)); p != "" {
 		return selectedShell{Name: ShellNameSh, Path: p}, nil
 	}
+	if p, _ := exec.LookPath(string(ShellNameDash)); p != "" {
+		return selectedShell{Name: ShellNameDash, Path: p}, nil
+	}
+	if p, _ := exec.LookPath(string(ShellNameKsh)); p != "" {
+		return selectedShell{Name: ShellNameKsh, Path: p}, nil
+	}
+	if p, _ := exec.LookPath(string(ShellNameFish)); p != "" {
+		return selectedShell{Name: ShellNameFish, Path: p}, nil
+	}
 	return selectedShell{}, errors.New("no suitable shell found (bash/zsh/sh)")
 }
 
 func resolveShell(name string) (selectedShell, error) {
 	shellName := ShellName(name)
 	switch shellName {
-	case ShellNameBash, ShellNameZsh, ShellNameSh:
+	case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
 		p, err := exec.LookPath(name)
 		if err != nil {
 			return selectedShell{}, fmt.Errorf("shell not found: %s", name)
 		}
 		return selectedShell{Name: shellName, Path: p}, nil
+	case ShellNamePwsh:
+		p, err := exec.LookPath("pwsh")
+		if err != nil {
+			return selectedShell{}, errors.New("pwsh requested but not found")
+		}
+		return selectedShell{Name: ShellNamePwsh, Path: p}, nil
 	case ShellNamePowershell:
 		// Accept pwsh or powershell as the resolved path.
 		if p, _ := exec.LookPath("pwsh"); p != "" {
-			return selectedShell{Name: ShellNamePowershell, Path: p}, nil
+			return selectedShell{Name: ShellNamePwsh, Path: p}, nil
 		}
 		p, err := exec.LookPath("powershell")
 		if err != nil {
@@ -1037,25 +983,14 @@ func resolveShell(name string) (selectedShell, error) {
 	}
 }
 
-func deriveExecArgs(sel selectedShell, command string, login bool) []string {
+func deriveExecArgs(sel selectedShell, command string) []string {
 	switch sel.Name {
-	case ShellNameBash, ShellNameZsh, ShellNameSh:
-		// Hardened default: NOT login unless explicitly enabled.
-		// Login=true runs rc/profile scripts and can execute arbitrary user-defined code.
-		flag := "-c"
-		if login {
-			flag = "-lc"
-		}
-		return []string{sel.Path, flag, command}
+	case ShellNameBash, ShellNameZsh, ShellNameSh, ShellNameDash, ShellNameKsh, ShellNameFish:
+		return []string{sel.Path, "-c", command}
 
-	case ShellNamePowershell:
-		// Login=true => allow profile; otherwise no profile for determinism.
-		// Add -NonInteractive to avoid prompts.
-		args := []string{sel.Path, "-NoLogo", "-NonInteractive"}
-		if !login {
-			args = append(args, "-NoProfile")
-		}
-		args = append(args, "-Command", command)
+	case ShellNamePowershell, ShellNamePwsh:
+		// Always deterministic by default: no profile; non-interactive to avoid prompts.
+		args := []string{sel.Path, "-NoLogo", "-NonInteractive", "-NoProfile", "-Command", command}
 		return args
 
 	case ShellNameCmd:
@@ -1090,4 +1025,47 @@ func newSessionID() string {
 	}
 	now := time.Now().UTC().UnixNano()
 	return fmt.Sprintf("sess_%d_%d", now, os.Getpid())
+}
+
+func effectiveTimeout(policy ShellCommandPolicy) time.Duration {
+	d := policy.Timeout
+	if d <= 0 {
+		d = DefaultTimeout
+	}
+	if d > HardMaxTimeout {
+		d = HardMaxTimeout
+	}
+	return d
+}
+
+func effectiveMaxOutputBytes(policy ShellCommandPolicy) int64 {
+	v := policy.MaxOutputBytes
+	if v <= 0 {
+		v = DefaultMaxOutputBytes
+	}
+	v = max(v, MinOutputBytes)
+	v = min(v, HardMaxOutputBytes)
+	// Also prevent int overflow in cappedWriter allocation.
+	v = min(v, int64(math.MaxInt))
+	return v
+}
+
+func effectiveMaxCommands(policy ShellCommandPolicy) int {
+	v := policy.MaxCommands
+	if v <= 0 {
+		v = DefaultMaxCommands
+	}
+	v = max(v, 1)
+	v = min(v, HardMaxCommands)
+	return v
+}
+
+func effectiveMaxCommandLength(policy ShellCommandPolicy) int {
+	v := policy.MaxCommandLength
+	if v <= 0 {
+		v = DefaultMaxCommandLength
+	}
+	v = max(v, 1)
+	v = min(v, HardMaxCommandLength)
+	return v
 }

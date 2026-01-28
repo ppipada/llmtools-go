@@ -22,17 +22,17 @@ var mimeForPathTool = spec.Tool{
 	Tags:          []string{"fs", "mime"},
 
 	ArgSchema: spec.JSONSchema(`{
-	  "$schema": "http://json-schema.org/draft-07/schema#",
-	  "type": "object",
-	  "properties": {
-	    "path": {
-	      "type": "string",
-	      "description": "Absolute or relative filesystem path."
-	    }
-	  },
-	  "required": ["path"],
-	  "additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"path": {
+		"type": "string",
+		"description": "Absolute or relative filesystem path."
+	}
+},
+"required": ["path"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: mimeForPathFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,

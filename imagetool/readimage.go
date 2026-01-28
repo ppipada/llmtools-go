@@ -21,22 +21,22 @@ var readImageTool = spec.Tool{
 	Tags:          []string{"image", "file"},
 
 	ArgSchema: spec.JSONSchema(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"type": "object",
-		"properties": {
-			"path": {
-				"type": "string",
-				"description": "Absolute or relative path of the image to read."
-			},
-			"includeBase64Data": {
-				"type": "boolean",
-				"description": "If true, include the base64-encoded file contents in the output.",
-				"default": false
-			}
-		},
-		"required": ["path"],
-		"additionalProperties": false
-	}`),
+"$schema": "http://json-schema.org/draft-07/schema#",
+"type": "object",
+"properties": {
+	"path": {
+		"type": "string",
+		"description": "Absolute or relative path of the image to read."
+	},
+	"includeBase64Data": {
+		"type": "boolean",
+		"description": "If true, include the base64-encoded file contents in the output.",
+		"default": false
+	}
+},
+"required": ["path"],
+"additionalProperties": false
+}`),
 	GoImpl: spec.GoToolImpl{FuncID: readImageFuncID},
 
 	CreatedAt:  spec.SchemaStartTime,
