@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -48,7 +47,7 @@ var shellToolSpec = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Shell",
 	Description:   "Execute local shell commands (cross-platform) with session-like persistence for workdir/env.",
-	Tags:          []string{"shell", "exec", "cli"},
+	Tags:          []string{"shell", "exec"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -135,12 +134,8 @@ type ShellCommandExecResult struct {
 	Stdout string `json:"stdout"`
 	Stderr string `json:"stderr"`
 
-	StdoutBytes     int64 `json:"stdoutBytes"`
-	StderrBytes     int64 `json:"stderrBytes"`
-	StdoutTruncated bool  `json:"stdoutTruncated"`
-	StderrTruncated bool  `json:"stderrTruncated"`
-
-	Warnings []string `json:"warnings,omitempty"`
+	StdoutTruncated bool `json:"stdoutTruncated"`
+	StderrTruncated bool `json:"stderrTruncated"`
 }
 
 type ShellCommandResponse struct {
@@ -250,13 +245,13 @@ func (st *ShellTool) SetAllowedWorkdirRoots(roots []string) error {
 	return nil
 }
 
-func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
-	return toolutil.WithRecoveryResp(func() (out []spec.ToolStoreOutputUnion, err error) {
+func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out *ShellCommandResponse, err error) {
+	return toolutil.WithRecoveryResp(func() (out *ShellCommandResponse, err error) {
 		return st.run(ctx, args)
 	})
 }
 
-func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
+func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *ShellCommandResponse, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -397,15 +392,13 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out []spec
 			return nil, errors.New("command contains NUL byte")
 		}
 
-		warnings := classifyWarnings(command)
-
 		if !policy.AllowDangerous {
 			if err := toolutil.RejectDangerousCommand(command, string(sel.Name), sel.Path); err != nil {
 				return nil, err
 			}
 		}
 
-		res, err := runOne(ctx, sel, command, workdir, env, timeout, maxOut, warnings)
+		res, err := runOne(ctx, sel, command, workdir, env, timeout, maxOut)
 		if err != nil {
 			// We still return structured output when possible.
 			// If it's an exec-start failure, include it in stderr-ish form.
@@ -415,14 +408,11 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out []spec
 				Shell:     sel.Name,
 				ShellPath: sel.Path,
 
-				ExitCode:    127,
-				TimedOut:    false,
-				DurationMS:  0,
-				Stdout:      "",
-				Stderr:      err.Error(),
-				StdoutBytes: 0,
-				StderrBytes: int64(len(err.Error())),
-				Warnings:    warnings,
+				ExitCode:   127,
+				TimedOut:   false,
+				DurationMS: 0,
+				Stdout:     "",
+				Stderr:     err.Error(),
 			}
 		}
 		results = append(results, res)
@@ -437,8 +427,7 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out []spec
 		Results:   results,
 	}
 
-	out, err = toolJSONText(resp)
-	return out, err
+	return &resp, err
 }
 
 func runOne(
@@ -449,7 +438,6 @@ func runOne(
 	env []string,
 	timeout time.Duration,
 	maxOut int64,
-	warnings []string,
 ) (ShellCommandExecResult, error) {
 	ctx := parent
 	var cancel context.CancelFunc
@@ -520,12 +508,8 @@ func runOne(
 		Stdout: safeUTF8(stdoutW.Bytes()),
 		Stderr: safeUTF8(stderrW.Bytes()),
 
-		StdoutBytes:     stdoutW.TotalBytes(),
-		StderrBytes:     stderrW.TotalBytes(),
 		StdoutTruncated: stdoutW.Truncated(),
 		StderrTruncated: stderrW.Truncated(),
-
-		Warnings: warnings,
 	}, nil
 }
 
@@ -542,19 +526,6 @@ func exitCodeFromWait(waitErr error, timedOut bool) int {
 	}
 
 	return 127 // Spawn/other failure
-}
-
-func toolJSONText(v any) ([]spec.ToolStoreOutputUnion, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return []spec.ToolStoreOutputUnion{
-		{
-			Kind:     spec.ToolStoreOutputKindText,
-			TextItem: &spec.ToolStoreOutputText{Text: string(b)},
-		},
-	}, nil
 }
 
 func safeUTF8(b []byte) string {
@@ -1007,21 +978,6 @@ func deriveExecArgs(sel selectedShell, command string) []string {
 
 		return []string{sel.Path, "-c", command}
 	}
-}
-
-func classifyWarnings(cmd string) []string {
-	c := strings.ToLower(cmd)
-	var w []string
-	if strings.Contains(c, "curl ") || strings.Contains(c, "wget ") || strings.Contains(c, "ssh ") {
-		w = append(w, "network_access")
-	}
-	if strings.Contains(c, "git ") {
-		w = append(w, "git_operation")
-	}
-	if strings.Contains(c, "rm ") || strings.Contains(c, "del ") {
-		w = append(w, "potentially_destructive")
-	}
-	return w
 }
 
 func newSessionID() string {

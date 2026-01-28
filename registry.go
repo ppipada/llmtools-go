@@ -111,7 +111,7 @@ func RegisterBuiltins(r *Registry) error {
 	if err != nil {
 		return err
 	}
-	if err := RegisterOutputsTool(r, sh.Tool(), sh.Run); err != nil {
+	if err := RegisterTypedAsTextTool(r, sh.Tool(), sh.Run); err != nil {
 		return err
 	}
 	return nil

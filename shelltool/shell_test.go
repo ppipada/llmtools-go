@@ -2,18 +2,14 @@ package shelltool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/flexigpt/llmtools-go/spec"
 )
 
 func TestShellCommand_AutoSession_DoesNotLeakOnEarlyError(t *testing.T) {
@@ -165,23 +161,6 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 	}
 }
 
-func TestClassifyWarnings(t *testing.T) {
-	w := classifyWarnings("curl https://example.com")
-	if !contains(w, "network_access") {
-		t.Fatalf("expected network_access warning, got %#v", w)
-	}
-
-	w = classifyWarnings("git status")
-	if !contains(w, "git_operation") {
-		t.Fatalf("expected git_operation warning, got %#v", w)
-	}
-
-	w = classifyWarnings("rm -rf ./tmp")
-	if !contains(w, "potentially_destructive") {
-		t.Fatalf("expected potentially_destructive warning, got %#v", w)
-	}
-}
-
 func TestEffectiveEnv_OrderIsDeterministicNonDecreasingByCanonicalKey(t *testing.T) {
 	// We can't control all of os.Environ(), but we can assert monotonic ordering.
 	t.Setenv("ZZZ_TEST_ENV", "1")
@@ -249,7 +228,7 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(resp.Results))
 	}
@@ -282,7 +261,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if resp.Results[0].ExitCode != 7 {
 		t.Fatalf("expected exitCode=7, got %d", resp.Results[0].ExitCode)
 	}
@@ -295,7 +274,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
 	}
-	resp = decodeShellResponse(t, out)
+	resp = out
 	if resp.Results[0].ExitCode != 137 {
 		t.Fatalf("expected exitCode=137, got %d (stderr=%q)", resp.Results[0].ExitCode, resp.Results[0].Stderr)
 	}
@@ -319,7 +298,7 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(resp.Results))
 	}
@@ -351,7 +330,7 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ShellCommand error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	r := resp.Results[0]
 
 	if !r.StdoutTruncated {
@@ -359,9 +338,6 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	}
 	if got := int64(len(r.Stdout)); got != 1024 {
 		t.Fatalf("expected captured stdout len=1024, got %d", got)
-	}
-	if r.StdoutBytes <= 1024 {
-		t.Fatalf("expected stdoutBytes > %d, got %d", 1024, r.StdoutBytes)
 	}
 }
 
@@ -382,7 +358,7 @@ func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result due to stop-on-error, got %d", len(resp.Results))
 	}
@@ -408,7 +384,7 @@ func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testi
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if len(resp.Results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(resp.Results))
 	}
@@ -488,7 +464,7 @@ func TestSessions_TTL_Evicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 	if resp.SessionID == "" {
 		t.Fatalf("expected session id")
 	}
@@ -512,13 +488,12 @@ func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run1 error: %v", err)
 	}
-	sid1 := decodeShellResponse(t, out1).SessionID
+	sid1 := out1.SessionID
 
-	out2, err := st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
+	_, err = st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
 	if err != nil {
 		t.Fatalf("Run2 error: %v", err)
 	}
-	_ = decodeShellResponse(t, out2).SessionID
 
 	_, err = st.Run(t.Context(), ShellCommandArgs{
 		SessionID: sid1,
@@ -547,7 +522,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("ShellCommand(auto session) error: %v", err)
 	}
-	resp := decodeShellResponse(t, out)
+	resp := out
 
 	if resp.SessionID == "" {
 		t.Fatalf("expected sessionID returned")
@@ -574,7 +549,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("ShellCommand(session reuse) error: %v", err)
 	}
-	resp = decodeShellResponse(t, out)
+	resp = out
 	if resp.Results[0].Stdout != "bar" {
 		t.Fatalf("expected FOO=bar, got %q (stderr=%q)", resp.Results[0].Stdout, resp.Results[0].Stderr)
 	}
@@ -592,7 +567,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("ShellCommand(session update env) error: %v", err)
 	}
-	resp = decodeShellResponse(t, out)
+	resp = out
 	if resp.Results[0].Stdout != "baz" {
 		t.Fatalf("expected FOO=baz, got %q", resp.Results[0].Stdout)
 	}
@@ -605,7 +580,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("ShellCommand(session verify env persisted) error: %v", err)
 	}
-	resp = decodeShellResponse(t, out)
+	resp = out
 	if resp.Results[0].Stdout != "baz" {
 		t.Fatalf("expected FOO=baz persisted, got %q", resp.Results[0].Stdout)
 	}
@@ -622,7 +597,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("ShellCommand(new session) error: %v", err)
 	}
-	resp = decodeShellResponse(t, out)
+	resp = out
 	if filepath.Clean(resp.Workdir) != filepath.Clean(cwd) {
 		t.Fatalf("expected new session workdir reset to cwd=%q, got %q", cwd, resp.Workdir)
 	}
@@ -665,29 +640,6 @@ func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
 	killProcessGroup(&exec.Cmd{})
 }
 
-func TestToolJSONText_ProducesTextUnion(t *testing.T) {
-	type X struct {
-		A string `json:"a"`
-	}
-	out, err := toolJSONText(X{A: "b"})
-	if err != nil {
-		t.Fatalf("toolJSONText error: %v", err)
-	}
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output, got %d", len(out))
-	}
-	if out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
-		t.Fatalf("expected text output union")
-	}
-	var x X
-	if err := json.Unmarshal([]byte(out[0].TextItem.Text), &x); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if x.A != "b" {
-		t.Fatalf("expected a=b, got %q", x.A)
-	}
-}
-
 func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 	st := newTestShellTool(t)
 
@@ -715,23 +667,6 @@ func newTestShellTool(t *testing.T, opts ...ShellToolOption) *ShellTool {
 	return st
 }
 
-func decodeShellResponse(t *testing.T, out []spec.ToolStoreOutputUnion) ShellCommandResponse {
-	t.Helper()
-
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output item, got %d", len(out))
-	}
-	if out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
-		t.Fatalf("expected text output, got kind=%q textItem=%v", out[0].Kind, out[0].TextItem)
-	}
-
-	var resp ShellCommandResponse
-	if err := json.Unmarshal([]byte(out[0].TextItem.Text), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response JSON: %v\njson=%s", err, out[0].TextItem.Text)
-	}
-	return resp
-}
-
 func mustLookPath(t *testing.T, name string) string {
 	t.Helper()
 	p, err := exec.LookPath(name)
@@ -739,8 +674,4 @@ func mustLookPath(t *testing.T, name string) string {
 		t.Skipf("missing dependency on PATH: %s (%v)", name, err)
 	}
 	return p
-}
-
-func contains(ss []string, want string) bool {
-	return slices.Contains(ss, want)
 }
