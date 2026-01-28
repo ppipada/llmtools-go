@@ -193,37 +193,40 @@ func (r *Registry) Call(
 	in json.RawMessage,
 	callOpts ...CallOption,
 ) ([]spec.ToolStoreOutputUnion, error) {
-	var co callOptions
-	for _, o := range callOpts {
-		if o != nil {
-			o(&co)
+	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
+		var co callOptions
+		for _, o := range callOpts {
+			if o != nil {
+				o(&co)
+			}
 		}
-	}
 
-	// Resolve timeout: call override > registry default.
-	r.mu.RLock()
-	effectiveTimeout := r.timeout
-	if co.timeout != nil {
-		effectiveTimeout = *co.timeout
-	}
-	r.mu.RUnlock()
+		// Resolve timeout: call override > registry default.
+		r.mu.RLock()
+		effectiveTimeout := r.timeout
+		if co.timeout != nil {
+			effectiveTimeout = *co.timeout
+		}
+		r.mu.RUnlock()
 
-	// Treat negative like "no timeout" (avoid surprising immediate cancellation).
-	if effectiveTimeout < 0 {
-		effectiveTimeout = 0
-	}
+		// Treat negative like "no timeout" (avoid surprising immediate cancellation).
+		if effectiveTimeout < 0 {
+			effectiveTimeout = 0
+		}
 
-	if effectiveTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, effectiveTimeout)
-		defer cancel()
-	}
+		fnCtx := ctx
+		if effectiveTimeout > 0 {
+			var cancel context.CancelFunc
+			fnCtx, cancel = context.WithTimeout(ctx, effectiveTimeout)
+			defer cancel()
+		}
 
-	fn, ok := r.Lookup(funcID)
-	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", funcID)
-	}
-	return fn(ctx, in)
+		fn, ok := r.Lookup(funcID)
+		if !ok {
+			return nil, fmt.Errorf("unknown tool: %s", funcID)
+		}
+		return fn(fnCtx, in)
+	})
 }
 
 func (r *Registry) Lookup(funcID spec.FuncID) (spec.ToolFunc, bool) {

@@ -64,6 +64,12 @@ const maxReadBytes = 16 * 1024 * 1024 // 16MB safety limit
 // ReadFile reads a file from disk and returns its contents.
 // If Encoding == "binary" the output is base64-encoded.
 func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
+	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
+		return readFile(ctx, args)
+	})
+}
+
+func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

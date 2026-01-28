@@ -72,6 +72,12 @@ type MIMEForExtensionOut struct {
 // - known: false
 // and does NOT error (so calling code can continue).
 func MIMEForExtension(ctx context.Context, args MIMEForExtensionArgs) (*MIMEForExtensionOut, error) {
+	return toolutil.WithRecoveryResp(func() (*MIMEForExtensionOut, error) {
+		return mimeForExtension(ctx, args)
+	})
+}
+
+func mimeForExtension(ctx context.Context, args MIMEForExtensionArgs) (*MIMEForExtensionOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

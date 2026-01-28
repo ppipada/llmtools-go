@@ -63,6 +63,12 @@ type SearchFilesOut struct {
 // SearchFiles walks Root (recursively) and returns up to MaxResults files
 // whose *path* or *UTF-8 text content* match the supplied regexp.
 func SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
+	return toolutil.WithRecoveryResp(func() (*SearchFilesOut, error) {
+		return searchFiles(ctx, args)
+	})
+}
+
+func searchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
 	matches, err := fileutil.SearchFiles(ctx, args.Root, args.Pattern, args.MaxResults)
 	if err != nil {
 		return nil, err

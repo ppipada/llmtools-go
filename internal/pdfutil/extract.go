@@ -4,23 +4,21 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
-	"github.com/flexigpt/llmtools-go/internal/logutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/ledongthuc/pdf"
 )
 
 // ExtractPDFTextSafe extracts text from a local PDF with a byte limit and panic recovery.
-func ExtractPDFTextSafe(ctx context.Context, path string, maxBytes int) (text string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			logutil.Warn("panic during PDF text extraction", "path", path, "panic", r)
-			err = fmt.Errorf("panic during PDF text extraction: %v", r)
-		}
-	}()
+func ExtractPDFTextSafe(ctx context.Context, path string, maxBytes int) (string, error) {
+	return toolutil.WithRecoveryResp(func() (string, error) {
+		return extractPDFTextSafe(ctx, path, maxBytes)
+	})
+}
 
+func extractPDFTextSafe(ctx context.Context, path string, maxBytes int) (text string, err error) {
 	f, r, err := pdf.Open(path)
 	if err != nil {
 		return "", err

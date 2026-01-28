@@ -57,6 +57,12 @@ type StatPathOut struct {
 
 // StatPath returns basic metadata for the supplied path without mutating the file system.
 func StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
+	return toolutil.WithRecoveryResp(func() (*StatPathOut, error) {
+		return statPath(ctx, args)
+	})
+}
+
+func statPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

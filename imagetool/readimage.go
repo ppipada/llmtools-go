@@ -75,6 +75,12 @@ type ReadImageOut struct {
 //   - non-image/unsupported image => error
 //   - non-existent path => (Exists=false, err=nil).
 func ReadImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ReadImageOut, error) {
+		return readImage(ctx, args)
+	})
+}
+
+func readImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

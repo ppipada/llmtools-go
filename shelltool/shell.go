@@ -251,6 +251,12 @@ func (st *ShellTool) SetAllowedWorkdirRoots(roots []string) error {
 }
 
 func (st *ShellTool) Run(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
+	return toolutil.WithRecoveryResp(func() (out []spec.ToolStoreOutputUnion, err error) {
+		return st.run(ctx, args)
+	})
+}
+
+func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out []spec.ToolStoreOutputUnion, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

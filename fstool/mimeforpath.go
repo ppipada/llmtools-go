@@ -70,6 +70,12 @@ type MIMEForPathOut struct {
 // - If the extension maps to a non-generic MIME type, it may succeed even if the file does not exist.
 // - If the extension is unknown/generic, it tries to open and sniff the file (can error if unreadable).
 func MIMEForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
+	return toolutil.WithRecoveryResp(func() (*MIMEForPathOut, error) {
+		return mimeForPath(ctx, args)
+	})
+}
+
+func mimeForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -57,6 +57,12 @@ type ListDirectoryOut struct {
 // ListDirectory lists files / dirs in Path. If Pattern is supplied, the
 // results are filtered via filepath.Match.
 func ListDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ListDirectoryOut, error) {
+		return listDirectory(ctx, args)
+	})
+}
+
+func listDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
