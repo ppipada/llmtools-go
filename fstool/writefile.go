@@ -97,13 +97,9 @@ func writeFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 		return nil, err
 	}
 
-	p, err := fileutil.NormalizePath(strings.TrimSpace(args.Path))
+	p, err := fileutil.NormalizeAbsPath(strings.TrimSpace(args.Path))
 	if err != nil {
 		return nil, err
-	}
-	// Per schema: require absolute path.
-	if !filepath.IsAbs(p) {
-		return nil, errors.New("path must be absolute")
 	}
 
 	enc := fileutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
