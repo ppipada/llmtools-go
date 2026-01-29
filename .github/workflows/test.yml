@@ -30,7 +30,7 @@ jobs:
           - os: windows-2022
             coverage: false
           - os: macos-15
-            coverage: true
+            coverage: false
 
     defaults:
       run:
