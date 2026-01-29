@@ -159,6 +159,16 @@ func TestEnsureDirNoSymlink(t *testing.T) {
 	})
 }
 
+func TestVerifyDirNoSymlink_AllowsDarwinSystemSymlinks(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only")
+	}
+
+	if err := VerifyDirNoSymlink(t.TempDir()); err != nil {
+		t.Fatalf("VerifyDirNoSymlink(os.TempDir()) unexpected error: %v", err)
+	}
+}
+
 func TestVerifyDirNoSymlink(t *testing.T) {
 	root := t.TempDir()
 

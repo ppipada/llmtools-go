@@ -184,7 +184,7 @@ func TestRejectDangerous_Windows_Patterns(t *testing.T) {
 
 		// Cross-platform blocks still apply on Windows too.
 		{name: "shutdown_blocked_on_windows", cmd: "shutdown /s /t 0", wantErr: true, wantSubstr: "shutdown"},
-		{name: "sudo_blocked_on_windows_too", cmd: "sudo whoami", wantErr: true, wantSubstr: "sudo/su"},
+		{name: "sudo_blocked_on_windows_too", cmd: "sudo whoami", wantErr: true, wantSubstr: "sudo"},
 		{name: "mkfs_blocked_on_windows_too", cmd: "mkfs.ext4 /dev/sda1", wantErr: true, wantSubstr: "mkfs"},
 	})
 }

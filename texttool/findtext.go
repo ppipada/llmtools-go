@@ -13,7 +13,7 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const findTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/texttool/findtext.FindText"
+const findTextFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/findtext.FindText"
 
 var findTextTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

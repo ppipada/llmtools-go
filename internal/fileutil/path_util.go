@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -62,6 +63,14 @@ func EnsureDirNoSymlink(dir string, maxNewDirs int) (created int, err error) {
 		st, err := os.Lstat(cur)
 		if err == nil {
 			if (st.Mode() & os.ModeSymlink) != 0 {
+				if resolved, ok, aerr := allowDarwinSystemSymlink(cur); aerr != nil {
+					return created, aerr
+				} else if ok {
+					// Treat the system symlink as allowed, and continue traversal
+					// from its resolved real directory.
+					cur = resolved
+					continue
+				}
 				return created, fmt.Errorf("refusing to traverse symlink path component: %s", cur)
 			}
 			if !st.IsDir() {
@@ -135,6 +144,12 @@ func VerifyDirNoSymlink(dir string) error {
 			return err
 		}
 		if (st.Mode() & os.ModeSymlink) != 0 {
+			if resolved, ok, aerr := allowDarwinSystemSymlink(cur); aerr != nil {
+				return aerr
+			} else if ok {
+				cur = resolved
+				continue
+			}
 			return fmt.Errorf("refusing to traverse symlink path component: %s", cur)
 		}
 		if !st.IsDir() {
@@ -192,4 +207,62 @@ func randomHex(nBytes int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// allowDarwinSystemSymlink checks whether cur is one of the macOS compatibility
+// symlinks and (if so) returns the expected resolved absolute directory.
+//
+// This allows us to keep "no symlink traversal" behavior while permitting:
+//
+//	/var -> /private/var
+//	/tmp -> /private/tmp
+//	/etc -> /private/etc
+//
+// (You can extend this list if needed, but keep it small.)
+func allowDarwinSystemSymlink(cur string) (resolved string, ok bool, err error) {
+	if runtime.GOOS != "darwin" {
+		return "", false, nil
+	}
+	// Only allow exact root-level paths.
+	expected := map[string]string{
+		"/var":  "/private/var",
+		"/tmp":  "/private/tmp",
+		"/etc":  "/private/etc",
+		"/bin":  "/usr/bin",
+		"/sbin": "/usr/sbin",
+		"/lib":  "/usr/lib",
+	}[cur]
+	if expected == "" {
+		return "", false, nil
+	}
+
+	target, rerr := os.Readlink(cur)
+	if rerr != nil {
+		return "", false, rerr
+	}
+
+	// Readlink may return relative targets like "private/var".
+	res := target
+	if !filepath.IsAbs(res) {
+		res = filepath.Join(filepath.Dir(cur), res)
+	}
+	res = filepath.Clean(res)
+
+	if res != expected {
+		return "", false, nil
+	}
+
+	// Ensure the resolved target is a real directory (and not itself a symlink).
+	st, serr := os.Lstat(res)
+	if serr != nil {
+		return "", false, serr
+	}
+	if (st.Mode() & os.ModeSymlink) != 0 {
+		return "", false, nil
+	}
+	if !st.IsDir() {
+		return "", false, nil
+	}
+
+	return res, true, nil
 }

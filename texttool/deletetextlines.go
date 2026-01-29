@@ -11,7 +11,7 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const deleteTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/texttool/deletetextlines.DeleteTextLines"
+const deleteTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/deletetextlines.DeleteTextLines"
 
 var deleteTextLinesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

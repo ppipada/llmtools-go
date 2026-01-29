@@ -11,7 +11,7 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const readTextRangeFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/texttool/readtextrange.ReadTextRange"
+const readTextRangeFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/readtextrange.ReadTextRange"
 
 var readTextRangeTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

@@ -11,7 +11,7 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const replaceTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/texttool/replacetextlines.ReplaceTextLines"
+const replaceTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/replacetextlines.ReplaceTextLines"
 
 var replaceTextLinesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,

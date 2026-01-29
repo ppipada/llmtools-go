@@ -12,7 +12,7 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/texttool/inserttextlines.InsertTextLines"
+const insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttextlines.InsertTextLines"
 
 var insertTextLinesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
