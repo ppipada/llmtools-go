@@ -189,6 +189,21 @@ func TestRejectDangerous_Windows_Patterns(t *testing.T) {
 	})
 }
 
+func TestForEachSegment_SplitsPipeAndOrOr(t *testing.T) {
+	var segs []string
+	err := forEachSegment("echo x || sudo ls | cat", dialectSh, func(seg string) error {
+		segs = append(segs, seg)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Expect: ["echo x", "sudo ls", "cat"]
+	if len(segs) != 3 {
+		t.Fatalf("segs=%#v", segs)
+	}
+}
+
 func runRejectCases(t *testing.T, cases []rejectTC) {
 	t.Helper()
 	for _, tc := range cases {
