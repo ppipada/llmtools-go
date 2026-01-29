@@ -97,3 +97,73 @@ func TestReadFile(t *testing.T) {
 		})
 	}
 }
+
+func TestReadFile_MaxBytes(t *testing.T) {
+	dir := t.TempDir()
+
+	p := filepath.Join(dir, "data.bin")
+	data := []byte("hello") // 5 bytes
+	mustWriteBytes(t, p, data)
+
+	tests := []struct {
+		name        string
+		maxBytes    int64
+		encoding    ReadEncoding
+		want        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "maxBytes zero means unlimited",
+			maxBytes: 0,
+			encoding: ReadEncodingText,
+			want:     "hello",
+		},
+		{
+			name:     "maxBytes exact size ok",
+			maxBytes: 5,
+			encoding: ReadEncodingText,
+			want:     "hello",
+		},
+		{
+			name:        "maxBytes smaller than size errors",
+			maxBytes:    4,
+			encoding:    ReadEncodingText,
+			wantErr:     true,
+			errContains: "exceeds maximum allowed size",
+		},
+		{
+			name:     "binary encoding base64",
+			maxBytes: 5,
+			encoding: ReadEncodingBinary,
+			want:     base64.StdEncoding.EncodeToString(data),
+		},
+		{
+			name:     "negative maxBytes treated as unlimited",
+			maxBytes: -1,
+			encoding: ReadEncodingText,
+			want:     "hello",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ReadFile(p, tc.encoding, tc.maxBytes)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%q)", got)
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}

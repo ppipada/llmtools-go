@@ -74,7 +74,7 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		return nil, err
 	}
 	// Normalize and validate encoding.
-	enc := fileutil.ReadEncoding(strings.TrimSpace(args.Encoding))
+	enc := fileutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
 	if enc == "" {
 		enc = fileutil.ReadEncodingText
 	}

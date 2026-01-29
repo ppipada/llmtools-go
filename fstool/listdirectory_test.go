@@ -65,7 +65,7 @@ func TestListDirectory(t *testing.T) {
 		{
 			name:    "Invalid glob pattern returns error",
 			args:    ListDirectoryArgs{Path: tmpDir, Pattern: "["},
-			wantErr: false,
+			wantErr: true,
 		},
 	}
 

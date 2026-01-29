@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"unicode/utf8"
 )
 
 var errSearchLimitReached = errors.New("search limit reached")
@@ -14,9 +15,15 @@ var errSearchLimitReached = errors.New("search limit reached")
 // SearchFiles walks root (default ".") recursively and returns up to maxResults files
 // whose *path* or UTF-8 text content* match the regexp pattern.
 // If maxResults <= 0, it is treated as "no limit".
-func SearchFiles(ctx context.Context, root, pattern string, maxResults int) ([]string, error) {
+func SearchFiles(
+	ctx context.Context,
+	root, pattern string,
+	maxResults int,
+) (matchedFiles []string, reachedLimit bool, err error) {
+	reachedLimit = false
+
 	if pattern == "" {
-		return nil, errors.New("pattern is required")
+		return nil, reachedLimit, errors.New("pattern is required")
 	}
 	if root == "" {
 		root = "."
@@ -24,7 +31,7 @@ func SearchFiles(ctx context.Context, root, pattern string, maxResults int) ([]s
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, err
+		return nil, reachedLimit, err
 	}
 
 	limit := maxResults
@@ -58,14 +65,21 @@ func SearchFiles(ctx context.Context, root, pattern string, maxResults int) ([]s
 		} else {
 			// Check file content only for reasonably small files.
 			if info, _ := d.Info(); info != nil && info.Size() < 1*1024*1024 { // 1 MB guard
-				if data, rerr := os.ReadFile(path); rerr == nil && re.Match(data) {
-					matches = append(matches, path)
+				if data, rerr := os.ReadFile(path); rerr == nil {
+					sample := data[:min(len(data), 4096)]
+					if !isProbablyTextSample(sample) || !utf8.Valid(data) {
+						return nil
+					}
+					if re.Match(data) {
+						matches = append(matches, path)
+					}
 				}
 			}
 		}
 
 		// If we just reached or exceeded the limit, abort the walk.
 		if len(matches) >= limit {
+			reachedLimit = true
 			return errSearchLimitReached
 		}
 
@@ -74,7 +88,7 @@ func SearchFiles(ctx context.Context, root, pattern string, maxResults int) ([]s
 
 	err = filepath.WalkDir(root, walkFn)
 	if err != nil && !errors.Is(err, errSearchLimitReached) {
-		return nil, err
+		return nil, reachedLimit, err
 	}
 
 	// Safety clamp: should not be needed, but guarantees we never return more than limit.
@@ -82,5 +96,5 @@ func SearchFiles(ctx context.Context, root, pattern string, maxResults int) ([]s
 		matches = matches[:limit]
 	}
 
-	return matches, nil
+	return matches, reachedLimit, nil
 }

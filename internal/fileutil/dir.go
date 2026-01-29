@@ -21,7 +21,10 @@ func ListDirectory(path, pattern string) ([]string, error) {
 	for _, e := range entries {
 		name := e.Name()
 		if pattern != "" {
-			matched, _ := filepath.Match(pattern, name)
+			matched, matchErr := filepath.Match(pattern, name)
+			if matchErr != nil {
+				return nil, matchErr
+			}
 			if !matched {
 				continue
 			}

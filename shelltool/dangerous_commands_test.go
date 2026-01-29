@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 type rejectTC struct {
@@ -24,7 +26,7 @@ func TestRejectDangerous_EmptyAndWhitespace(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
@@ -64,7 +66,7 @@ func TestRejectDangerous_Unix_SafeInputs(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
@@ -126,7 +128,7 @@ func TestRejectDangerous_Unix_RejectedInputs(t *testing.T) {
 }
 
 func TestRejectDangerous_Unix_WrappersAndAssignments(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-focused expectations")
 	}
 
@@ -145,7 +147,7 @@ func TestRejectDangerous_Unix_WrappersAndAssignments(t *testing.T) {
 }
 
 func TestRejectDangerous_Windows_Patterns(t *testing.T) {
-	if runtime.GOOS != GOOSWindows {
+	if runtime.GOOS != toolutil.GOOSWindows {
 		t.Skip("windows-only patterns")
 	}
 
@@ -196,7 +198,7 @@ func runRejectCases(t *testing.T, cases []rejectTC) {
 				tc.shellName = "sh"
 			}
 			if tc.shellPath == "" {
-				if runtime.GOOS == GOOSWindows {
+				if runtime.GOOS == toolutil.GOOSWindows {
 					tc.shellPath = `C:\Windows\System32\cmd.exe`
 				} else {
 					tc.shellPath = "/bin/sh"

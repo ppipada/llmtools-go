@@ -17,6 +17,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/shelltool"
 	"github.com/flexigpt/llmtools-go/spec"
+	"github.com/flexigpt/llmtools-go/texttool"
 )
 
 // Registry provides lookup/register for Go tools by funcID, with json.RawMessage I/O.
@@ -86,10 +87,16 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterOutputsTool(r, fstool.ReadFileTool(), fstool.ReadFile); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool(), fstool.ListDirectory); err != nil {
+	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool(), fstool.SearchFiles); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool(), fstool.SearchFiles); err != nil {
+	if err := RegisterTypedAsTextTool(r, fstool.WriteFileTool(), fstool.WriteFile); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.DeleteFileTool(), fstool.DeleteFile); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool(), fstool.ListDirectory); err != nil {
 		return err
 	}
 	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool(), fstool.StatPath); err != nil {
@@ -101,9 +108,11 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, fstool.MIMEForExtensionTool(), fstool.MIMEForExtension); err != nil {
 		return err
 	}
+
 	if err := RegisterTypedAsTextTool(r, imagetool.ReadImageTool(), imagetool.ReadImage); err != nil {
 		return err
 	}
+
 	sh, err := shelltool.NewShellTool(
 	// Defaults are fine for builtins; hosts should instantiate their own tool with custom policy/sessions/env/workdir
 	// settings as needed.
@@ -114,6 +123,23 @@ func RegisterBuiltins(r *Registry) error {
 	if err := RegisterTypedAsTextTool(r, sh.Tool(), sh.Run); err != nil {
 		return err
 	}
+
+	if err := RegisterTypedAsTextTool(r, texttool.ReadTextRangeTool(), texttool.ReadTextRange); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, texttool.FindTextTool(), texttool.FindText); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, texttool.InsertTextLinesTool(), texttool.InsertTextLines); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, texttool.ReplaceTextLinesTool(), texttool.ReplaceTextLines); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, texttool.DeleteTextLinesTool(), texttool.DeleteTextLines); err != nil {
+		return err
+	}
+
 	return nil
 }
 

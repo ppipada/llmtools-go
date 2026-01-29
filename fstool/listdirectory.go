@@ -13,7 +13,7 @@ const listDirectoryFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/fstool/
 var listDirectoryTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
 	ID:            "018fe0f4-b8cd-7e55-82d5-9df0bd70e4bb",
-	Slug:          "listdir",
+	Slug:          "listdirectory",
 	Version:       "v1.0.0",
 	DisplayName:   "List directory",
 	Description:   "Return the names of files/directories at the given path (optionally filtered by glob).",

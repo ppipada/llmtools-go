@@ -24,8 +24,6 @@ import (
 
 const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/shelltool/shell.ShellCommand"
 
-const GOOSWindows = "windows"
-
 // Fixed, package-wide hard limits (single source of truth).
 const (
 	HardMaxTimeout             = 10 * time.Minute
@@ -198,7 +196,7 @@ func WithShellBlockedCommands(cmds []string) ShellToolOption {
 			}
 			st.blockedCommands[n] = struct{}{}
 			// On Windows, also add the no-extension variant if it looks like an executable name.
-			if runtime.GOOS == GOOSWindows {
+			if runtime.GOOS == toolutil.GOOSWindows {
 				ext := strings.ToLower(filepath.Ext(n))
 				switch ext {
 				case ".exe", ".com", ".bat", ".cmd":
@@ -376,7 +374,7 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *Shell
 			if sess.env == nil {
 				sess.env = map[string]string{}
 			}
-			if runtime.GOOS == GOOSWindows {
+			if runtime.GOOS == toolutil.GOOSWindows {
 				// Rebuild session env to canonical keys to avoid case-insensitive duplicates
 				// causing nondeterministic behavior.
 				canon := make(map[string]string, len(sess.env)+len(args.Env))
@@ -864,7 +862,7 @@ func effectiveEnv(sess *shellSession, overrides map[string]string) ([]string, er
 }
 
 func canonicalEnvKey(k string) string {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		return strings.ToUpper(k)
 	}
 	return k
@@ -904,7 +902,7 @@ func selectShell(requested ShellName) (selectedShell, error) {
 	}
 
 	// Auto.
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		// Prefer pwsh, then Windows PowerShell, then cmd.
 		if p, _ := exec.LookPath("pwsh"); p != "" {
 			return selectedShell{Name: ShellNamePwsh, Path: p}, nil

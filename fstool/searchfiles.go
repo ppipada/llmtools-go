@@ -57,7 +57,9 @@ type SearchFilesArgs struct {
 	MaxResults int    `json:"maxResults,omitempty"`
 }
 type SearchFilesOut struct {
-	Matches []string `json:"matches"`
+	MatchCount        int      `json:"matchCount"`
+	ReachedMaxResults bool     `json:"reachedMaxResults"`
+	Matches           []string `json:"matches"`
 }
 
 // SearchFiles walks Root (recursively) and returns up to MaxResults files
@@ -69,9 +71,12 @@ func SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, er
 }
 
 func searchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
-	matches, err := fileutil.SearchFiles(ctx, args.Root, args.Pattern, args.MaxResults)
+	matches, reachedLimit, err := fileutil.SearchFiles(ctx, args.Root, args.Pattern, args.MaxResults)
 	if err != nil {
 		return nil, err
 	}
-	return &SearchFilesOut{Matches: matches}, nil
+	return &SearchFilesOut{
+		Matches: matches, MatchCount: len(matches),
+		ReachedMaxResults: reachedLimit,
+	}, nil
 }

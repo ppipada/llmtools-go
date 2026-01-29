@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"unicode"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 var hardBlockedCommands = func() map[string]struct{} {
@@ -69,7 +71,7 @@ func rejectDangerousCommand(
 
 	// Scan each "command segment" separated by ";, &&, ||, |, &, newline, (, )".
 	return forEachSegment(c, func(seg string) error {
-		toks := shellFields(seg, runtime.GOOS == GOOSWindows)
+		toks := shellFields(seg, runtime.GOOS == toolutil.GOOSWindows)
 		if len(toks) == 0 {
 			return nil
 		}
@@ -93,7 +95,7 @@ func rejectDangerousCommand(
 		}
 
 		// Windows-only: block "format" when using cmd (but do not block PowerShell's formatting cmdlets/aliases).
-		if runtime.GOOS == GOOSWindows && shellName == ShellNameCmd {
+		if runtime.GOOS == toolutil.GOOSWindows && shellName == ShellNameCmd {
 			// Name may be "format" or "format.exe"; treat both as blocked in cmd.
 			if isBlockedName("format", map[string]struct{}{"format": {}}) &&
 				isBlockedName(name, map[string]struct{}{"format": {}}) {
@@ -117,7 +119,7 @@ func isBlockedName(name string, blocked map[string]struct{}) bool {
 		return true
 	}
 	// On Windows, also match by stripping a common executable extension.
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		ext := strings.ToLower(filepath.Ext(name))
 		switch ext {
 		case ".exe", ".com", ".bat", ".cmd":

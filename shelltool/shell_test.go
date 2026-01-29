@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestShellCommand_AutoSession_DoesNotLeakOnEarlyError(t *testing.T) {
@@ -126,7 +128,7 @@ func TestValidateEnvMap(t *testing.T) {
 }
 
 func TestSelectShell_ResolveAndAuto(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific expectations")
 	}
 
@@ -216,7 +218,7 @@ func TestSafeUTF8_ReplacesInvalid(t *testing.T) {
 }
 
 func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix command expectations")
 	}
 	st := newTestShellTool(t)
@@ -248,7 +250,7 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 }
 
 func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific exit/signal expectations")
 	}
 	st := newTestShellTool(t)
@@ -281,7 +283,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 }
 
 func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sleep/timeout expectations")
 	}
 	p := DefaultShellCommandPolicy
@@ -312,7 +314,7 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 }
 
 func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sh loop expectations")
 	}
 	p := DefaultShellCommandPolicy
@@ -342,7 +344,7 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 }
 
 func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific")
 	}
 	st := newTestShellTool(t)
@@ -368,7 +370,7 @@ func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
 }
 
 func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific")
 	}
 	st := newTestShellTool(t)
@@ -407,7 +409,7 @@ func TestShellCommand_RejectsNULInCommand(t *testing.T) {
 }
 
 func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific dangerous patterns")
 	}
 	st := newTestShellTool(t)
@@ -449,7 +451,7 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 }
 
 func TestSessions_TTL_Evicts(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("timing tests may be flaky on some windows CI")
 	}
 	st := newTestShellTool(t,
@@ -505,7 +507,7 @@ func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
 }
 
 func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific")
 	}
 	st := newTestShellTool(t)
@@ -609,7 +611,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 }
 
 func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
-	if runtime.GOOS == GOOSWindows {
+	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific")
 	}
 

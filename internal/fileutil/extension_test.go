@@ -1,11 +1,239 @@
 package fileutil
 
 import (
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestGetNormalizedExt(t *testing.T) {
+	tests := []struct {
+		in   string
+		want FileExt
+	}{
+		{"txt", ExtTxt},
+		{".TXT", ExtTxt},
+		{"  .Md  ", ExtMd},
+		{"", FileExt("")},
+		{"   ", FileExt("")},
+	}
+
+	for _, tc := range tests {
+		t.Run("in="+tc.in, func(t *testing.T) {
+			if got := GetNormalizedExt(tc.in); got != tc.want {
+				t.Fatalf("GetNormalizedExt(%q)=%q want=%q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetBaseMIME(t *testing.T) {
+	tests := []struct {
+		in   MIMEType
+		want string
+	}{
+		{MIMEEmpty, ""},
+		{" Text/Plain; Charset=UTF-8 ", "text/plain"},
+		{"application/json", "application/json"},
+		{"IMAGE/PNG", "image/png"},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.in), func(t *testing.T) {
+			if got := GetBaseMIME(tc.in); got != tc.want {
+				t.Fatalf("GetBaseMIME(%q)=%q want=%q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetModeForMIME(t *testing.T) {
+	tests := []struct {
+		in   MIMEType
+		want ExtensionMode
+	}{
+		{MIMEEmpty, ExtensionModeDefault},
+		{MIMEApplicationOctetStream, ExtensionModeDefault},
+		{MIMETextPlain, ExtensionModeText},
+		{"text/x-python", ExtensionModeText},            // text/* heuristic
+		{"image/x-icon", ExtensionModeImage},            // image/* heuristic
+		{"application/vnd.foo+json", ExtensionModeText}, // +json heuristic
+		{"application/vnd.foo+xml", ExtensionModeText},  // +xml heuristic
+		{"application/x-unknown", ExtensionModeDefault}, // default fallback
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.in), func(t *testing.T) {
+			if got := GetModeForMIME(tc.in); got != tc.want {
+				t.Fatalf("GetModeForMIME(%q)=%q want=%q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMIMEFromExtensionString_InternalAndStdlibFallback(t *testing.T) {
+	// Force a deterministic stdlib fallback mapping.
+	ext := ".llmtestmime"
+	mt := "application/x-llmtestmime"
+	if err := mime.AddExtensionType(ext, mt); err != nil {
+		t.Fatalf("mime.AddExtensionType: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		ext         string
+		want        MIMEType
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "empty ext invalid",
+			ext:         "",
+			want:        MIMEEmpty,
+			wantErr:     true,
+			errContains: "invalid path",
+		},
+		{
+			name:        "blank ext invalid",
+			ext:         "   ",
+			want:        MIMEEmpty,
+			wantErr:     true,
+			errContains: "invalid path",
+		},
+		{
+			name:    "known internal mapping (no dot, mixed case)",
+			ext:     "PnG",
+			want:    MIMEImagePNG,
+			wantErr: false,
+		},
+		{
+			name:    "stdlib fallback mapping used",
+			ext:     "llmtestmime",
+			want:    MIMEType(mt),
+			wantErr: false,
+		},
+		{
+			name:        "unknown extension returns octet-stream + ErrUnknownExtension",
+			ext:         ".definitelynotreal",
+			want:        MIMEApplicationOctetStream,
+			wantErr:     true,
+			errContains: "unknown extension",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MIMEFromExtensionString(tc.ext)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (got=%q)", got)
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("MIMEFromExtensionString(%q)=%q want=%q", tc.ext, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
+	dir := t.TempDir()
+
+	mdPath := filepath.Join(dir, "doc.md")
+	if err := os.WriteFile(mdPath, []byte("# hello\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	noExtPNG := filepath.Join(dir, "imagefile")
+	pngHeader := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	if err := os.WriteFile(noExtPNG, pngHeader, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	unknownExtText := filepath.Join(dir, "x.unknownext")
+	if err := os.WriteFile(unknownExtText, []byte("just some text\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	fakeTxtIsPng := filepath.Join(dir, "fake.txt")
+	if err := os.WriteFile(fakeTxtIsPng, pngHeader, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		path       string
+		wantMethod MIMEDetectMethod
+		wantMode   ExtensionMode
+		wantMIME   MIMEType
+		wantErr    bool
+	}{
+		{
+			name:    "invalid path",
+			path:    "   ",
+			wantErr: true,
+		},
+		{
+			name:       "extension mapping used (md)",
+			path:       mdPath,
+			wantMethod: MIMEDetectMethodExtension,
+			wantMode:   ExtensionModeText,
+			wantMIME:   MIMETextMarkdown,
+		},
+		{
+			name:       "sniff used when no extension",
+			path:       noExtPNG,
+			wantMethod: MIMEDetectMethodSniff,
+			wantMode:   ExtensionModeImage,
+			wantMIME:   MIMEImagePNG,
+		},
+		{
+			name:       "sniff used when extension unknown",
+			path:       unknownExtText,
+			wantMethod: MIMEDetectMethodSniff,
+			wantMode:   ExtensionModeText,
+			wantMIME:   MIMETextPlain,
+		},
+		{
+			name:       "extension wins even if content is png (by design)",
+			path:       fakeTxtIsPng,
+			wantMethod: MIMEDetectMethodExtension,
+			wantMode:   ExtensionModeText,
+			wantMIME:   MIMETextPlain,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mt, mode, method, err := MIMEForLocalFile(tc.path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (mt=%q mode=%q method=%q)", mt, mode, method)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if method != tc.wantMethod {
+				t.Fatalf("method=%q want=%q", method, tc.wantMethod)
+			}
+			if mode != tc.wantMode {
+				t.Fatalf("mode=%q want=%q", mode, tc.wantMode)
+			}
+			if mt != tc.wantMIME {
+				t.Fatalf("mime=%q want=%q", mt, tc.wantMIME)
+			}
+		})
+	}
+}
 
 func TestSniffFileMIME(t *testing.T) {
 	dir := t.TempDir()
@@ -75,7 +303,7 @@ func TestSniffFileMIME(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mime, mode, err := SniffFileMIME(tc.path)
+			m, mode, err := SniffFileMIME(tc.path)
 
 			if tc.wantErr {
 				if err == nil {
@@ -94,8 +322,8 @@ func TestSniffFileMIME(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tc.wantMIME != "" && mime != MIMEType(tc.wantMIME) {
-				t.Errorf("MIME = %q, want %q", mime, tc.wantMIME)
+			if tc.wantMIME != "" && m != MIMEType(tc.wantMIME) {
+				t.Errorf("MIME = %q, want %q", m, tc.wantMIME)
 			}
 			isText := mode == ExtensionModeText
 			if isText != tc.wantIsText {

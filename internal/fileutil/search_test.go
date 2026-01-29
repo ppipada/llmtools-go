@@ -1,13 +1,18 @@
 package fileutil
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 // Structure describing the tree used in SearchFiles tests.
@@ -119,7 +124,7 @@ func TestSearchFilesBasic(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := SearchFiles(t.Context(), tc.root, tc.pattern, tc.maxResults)
+			got, _, err := SearchFiles(t.Context(), tc.root, tc.pattern, tc.maxResults)
 
 			if tc.wantErr {
 				if err == nil {
@@ -185,7 +190,7 @@ func TestSearchFilesRootDefaultUsesCWD(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := SearchFiles(t.Context(), "", tc.pattern, tc.maxResults)
+			got, _, err := SearchFiles(t.Context(), "", tc.pattern, tc.maxResults)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -227,7 +232,7 @@ func TestSearchFilesConcurrency(t *testing.T) {
 				go func(id int) {
 					defer wg.Done()
 					for j := 0; j < tc.iterations; j++ {
-						got, err := SearchFiles(t.Context(), tc.searchRoot, tc.searchPat, 0)
+						got, _, err := SearchFiles(t.Context(), tc.searchRoot, tc.searchPat, 0)
 						if err != nil {
 							errCh <- fmt.Errorf("goroutine %d: unexpected error: %w", id, err)
 							return
@@ -250,6 +255,82 @@ func TestSearchFilesConcurrency(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSearchFiles_ContextCanceled(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "hello")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, _, err := SearchFiles(ctx, root, "hello", 0)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestSearchFiles_SkipsBinaryAndNonUTF8Content(t *testing.T) {
+	root := t.TempDir()
+
+	// Binary file containing pattern in bytes but should be skipped by content check.
+	mustWriteBytes(t, filepath.Join(root, "bin.dat"), []byte{0x00, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'})
+
+	// Invalid UTF-8 file containing the pattern as bytes.
+	mustWriteBytes(
+		t,
+		filepath.Join(root, "badutf8.txt"),
+		[]byte{0xff, 0xfe, 'B', 'A', 'D', 'P', 'A', 'T', 'T', 'E', 'R', 'N'},
+	)
+
+	got, _, err := SearchFiles(t.Context(), root, "BADPATTERN", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no matches, got %v", got)
+	}
+}
+
+func TestSearchFiles_PathMatchStillWorksForBinary(t *testing.T) {
+	root := t.TempDir()
+
+	p := filepath.Join(root, "match-by-path.bin")
+	mustWriteBytes(t, p, []byte{0x00, 0x01, 0x02})
+
+	got, _, err := SearchFiles(t.Context(), root, "match-by-path", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != p {
+		t.Fatalf("got=%v want=[%v]", got, p)
+	}
+}
+
+func TestSearchFiles_UnreadableFileIsIgnored(t *testing.T) {
+	if runtime.GOOS == toolutil.GOOSWindows {
+		t.Skip("chmod semantics differ on Windows")
+	}
+
+	root := t.TempDir()
+	p := filepath.Join(root, "secret.txt")
+	writeFile(t, p, "SOMEPATTERN")
+
+	if err := os.Chmod(p, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(p, 0o600) })
+
+	// Give filesystem a moment (some FS/CI can be weird).
+	time.Sleep(10 * time.Millisecond)
+
+	got, _, err := SearchFiles(t.Context(), root, "SOMEPATTERN", 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 matches (unreadable content ignored), got %v", got)
 	}
 }
 
