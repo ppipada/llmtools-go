@@ -529,16 +529,12 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if resp.SessionID == "" {
 		t.Fatalf("expected sessionID returned")
 	}
-	if filepath.Clean(resp.Workdir) != filepath.Clean(td) {
-		t.Fatalf("expected resp.Workdir=%q, got %q", td, resp.Workdir)
-	}
+	mustSameDir(t, td, resp.Workdir)
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(resp.Results))
 	}
 	r0 := resp.Results[0]
-	if filepath.Clean(strings.TrimSpace(r0.Stdout)) != filepath.Clean(td) {
-		t.Fatalf("expected pwd=%q, got %q", td, r0.Stdout)
-	}
+	mustSameDir(t, td, strings.TrimSpace(r0.Stdout))
 
 	sid := resp.SessionID
 
@@ -555,9 +551,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if resp.Results[0].Stdout != "bar" {
 		t.Fatalf("expected FOO=bar, got %q (stderr=%q)", resp.Results[0].Stdout, resp.Results[0].Stderr)
 	}
-	if filepath.Clean(resp.Workdir) != filepath.Clean(td) {
-		t.Fatalf("expected workdir persisted as %q, got %q", td, resp.Workdir)
-	}
+	mustSameDir(t, td, resp.Workdir)
 
 	// 3) Update session env by providing Env; should persist for subsequent calls.
 	out, err = st.Run(t.Context(), ShellCommandArgs{
@@ -600,9 +594,8 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("ShellCommand(new session) error: %v", err)
 	}
 	resp = out
-	if filepath.Clean(resp.Workdir) != filepath.Clean(cwd) {
-		t.Fatalf("expected new session workdir reset to cwd=%q, got %q", cwd, resp.Workdir)
-	}
+	mustSameDir(t, cwd, resp.Workdir)
+
 	// After restart, FOO should be empty (unless inherited from process env; to avoid flake,
 	// assert only that it is not "baz").
 	if strings.Contains(resp.Results[0].Stdout, "baz") {
@@ -718,4 +711,19 @@ func mustLookPath(t *testing.T, name string) string {
 		t.Skipf("missing dependency on PATH: %s (%v)", name, err)
 	}
 	return p
+}
+
+func mustSameDir(t *testing.T, a, b string) {
+	t.Helper()
+	sa, err := os.Stat(a)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", a, err)
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", b, err)
+	}
+	if !os.SameFile(sa, sb) {
+		t.Fatalf("expected same dir:\n  a=%q\n  b=%q", a, b)
+	}
 }
