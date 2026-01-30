@@ -29,15 +29,16 @@ func TestSearchFilesBasic(t *testing.T) {
 	tree := createSearchTestTree(t)
 
 	tests := []struct {
-		name            string
-		root            string
-		pattern         string
-		maxResults      int
-		wantExactPaths  []string // compare as set if non-nil
-		allowedPaths    []string // each result must be one of these (for limit tests)
-		wantLen         int      // -1 means "don't check"; overrides len(wantExactPaths) when set
-		wantErr         bool
-		wantErrContains string
+		name             string
+		root             string
+		pattern          string
+		maxResults       int
+		wantExactPaths   []string // compare as set if non-nil
+		allowedPaths     []string // each result must be one of these (for limit tests)
+		wantLen          int      // -1 means "don't check"; overrides len(wantExactPaths) when set
+		wantReachedLimit *bool
+		wantErr          bool
+		wantErrContains  string
 	}{
 		{
 			name:           "match by filename only",
@@ -64,7 +65,8 @@ func TestSearchFilesBasic(t *testing.T) {
 				tree.contentPath,
 				tree.nestedPath,
 			},
-			wantLen: 1,
+			wantLen:          1,
+			wantReachedLimit: ptrBool(true),
 		},
 		{
 			name:            "pattern is required",
@@ -89,20 +91,22 @@ func TestSearchFilesBasic(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:           "maxResults zero treated as unlimited",
-			root:           tree.root,
-			pattern:        "txt",
-			maxResults:     0,
-			wantExactPaths: []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
-			wantLen:        -1,
+			name:             "maxResults zero treated as unlimited",
+			root:             tree.root,
+			pattern:          "txt",
+			maxResults:       0,
+			wantExactPaths:   []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
+			wantLen:          -1,
+			wantReachedLimit: ptrBool(false),
 		},
 		{
-			name:           "negative maxResults treated as unlimited",
-			root:           tree.root,
-			pattern:        "txt",
-			maxResults:     -10,
-			wantExactPaths: []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
-			wantLen:        -1,
+			name:             "negative maxResults treated as unlimited",
+			root:             tree.root,
+			pattern:          "txt",
+			maxResults:       -10,
+			wantExactPaths:   []string{tree.helloPath, tree.matchPath, tree.contentPath, tree.nestedPath},
+			wantLen:          -1,
+			wantReachedLimit: ptrBool(false),
 		},
 		{
 			name:           "large files are not searched by content",
@@ -120,11 +124,20 @@ func TestSearchFilesBasic(t *testing.T) {
 			wantExactPaths: []string{tree.helloPath},
 			wantLen:        -1,
 		},
+		{
+			name:             "maxResults larger than matches => reachedLimit=false",
+			root:             tree.root,
+			pattern:          "CONTENTPATTERN",
+			maxResults:       10,
+			wantExactPaths:   []string{tree.contentPath, tree.nestedPath},
+			wantLen:          -1,
+			wantReachedLimit: ptrBool(false),
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _, err := SearchFiles(t.Context(), tc.root, tc.pattern, tc.maxResults)
+			got, reachedLimit, err := SearchFiles(t.Context(), tc.root, tc.pattern, tc.maxResults)
 
 			if tc.wantErr {
 				if err == nil {
@@ -138,6 +151,9 @@ func TestSearchFilesBasic(t *testing.T) {
 
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantReachedLimit != nil && reachedLimit != *tc.wantReachedLimit {
+				t.Fatalf("reachedLimit=%v want=%v", reachedLimit, *tc.wantReachedLimit)
 			}
 
 			if tc.wantLen >= 0 && len(got) != tc.wantLen {
@@ -419,3 +435,5 @@ func equalStringSets(a, b []string) bool {
 func containsString(slice []string, target string) bool {
 	return slices.Contains(slice, target)
 }
+
+func ptrBool(b bool) *bool { return &b }

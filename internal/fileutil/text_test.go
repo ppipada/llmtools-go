@@ -218,6 +218,7 @@ func TestIsBlockEqualsAt(t *testing.T) {
 		{"match at 1", []string{"b", "c"}, 1, true},
 		{"mismatch at 0", []string{"b"}, 0, false},
 		{"match single", []string{"d"}, 3, true},
+		{"out of range start returns false (no panic)", []string{"c"}, 99, false},
 	}
 
 	for _, tc := range tests {

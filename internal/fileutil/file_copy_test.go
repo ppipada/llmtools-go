@@ -41,8 +41,11 @@ func TestCopyFileCtx(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat dst: %v", err)
 		}
-		if st.Mode().Perm() != 0o640 {
-			t.Fatalf("perm=%o want=%o", st.Mode().Perm(), 0o640)
+		got := st.Mode().Perm()
+		want := os.FileMode(0o640)
+		// Umask may remove bits; it should never add bits beyond what we requested.
+		if got|want != want {
+			t.Fatalf("perm=%o has bits outside requested=%o", got, want)
 		}
 	}
 }
@@ -89,6 +92,21 @@ func TestCopyFileCtx_Errors(t *testing.T) {
 			}
 		})
 	}
+	t.Run("src is directory => error and dst is cleaned up", func(t *testing.T) {
+		srcDir := filepath.Join(dir, "srcdir")
+		if err := os.Mkdir(srcDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		dst := filepath.Join(dir, "dst-from-dir.txt")
+
+		_, err := CopyFileCtx(t.Context(), srcDir, dst, 0o600)
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if _, statErr := os.Lstat(dst); !os.IsNotExist(statErr) {
+			t.Fatalf("expected dst to be removed on error; statErr=%v", statErr)
+		}
+	})
 }
 
 func TestCopyFileToExistingCtx(t *testing.T) {

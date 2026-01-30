@@ -54,6 +54,8 @@ func SearchFiles(
 
 		// If we've already hit the limit, abort the walk entirely.
 		if len(matches) >= limit {
+			// We are explicitly stopping early due to maxResults.
+			reachedLimit = true
 			return errSearchLimitReached
 		}
 

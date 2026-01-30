@@ -66,7 +66,7 @@ func CopyFileToExistingCtx(ctx context.Context, src, dst string) (int64, error) 
 
 // CopyFileCtx copies src->dst, creating dst with O_EXCL.
 // It checks ctx between read iterations.
-func CopyFileCtx(ctx context.Context, src, dst string, perm os.FileMode) (int64, error) {
+func CopyFileCtx(ctx context.Context, src, dst string, perm os.FileMode) (written int64, err error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -82,12 +82,18 @@ func CopyFileCtx(ctx context.Context, src, dst string, perm os.FileMode) (int64,
 		return 0, err
 	}
 
+	// If any error happens after dst is created, remove it to avoid leaving partial files behind.
 	defer func() {
-		_ = out.Close()
+		cerr := out.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+		if err != nil {
+			_ = os.Remove(dst)
+		}
 	}()
 
 	buf := make([]byte, 128*1024)
-	var written int64
 
 	for {
 		if err := ctx.Err(); err != nil {

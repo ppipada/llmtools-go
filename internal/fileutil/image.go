@@ -65,7 +65,7 @@ func ReadImage(
 	// We need to decode the image config; if includeBase64 is true, we can
 	// read the whole file once and reuse that data for both config and base64.
 	if includeBase64Data {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(out.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +80,7 @@ func ReadImage(
 	}
 
 	// No base64 requested: just open and decode config.
-	f, err := os.Open(path)
+	f, err := os.Open(out.Path)
 	if err != nil {
 		return nil, err
 	}

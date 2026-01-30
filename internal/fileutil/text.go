@@ -153,6 +153,15 @@ func GetTrimmedLines(lines []string) []string {
 }
 
 func IsBlockEqualsAt(haystack, needle []string, start int) bool {
+	if start < 0 {
+		return false
+	}
+	if len(needle) == 0 {
+		return true
+	}
+	if start+len(needle) > len(haystack) {
+		return false
+	}
 	for j := range needle {
 		if haystack[start+j] != needle[j] {
 			return false
