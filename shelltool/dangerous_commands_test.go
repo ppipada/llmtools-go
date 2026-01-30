@@ -1,6 +1,7 @@
 package shelltool
 
 import (
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -189,18 +190,131 @@ func TestRejectDangerous_Windows_Patterns(t *testing.T) {
 	})
 }
 
-func TestForEachSegment_SplitsPipeAndOrOr(t *testing.T) {
-	var segs []string
-	err := forEachSegment("echo x || sudo ls | cat", dialectSh, func(seg string) error {
-		segs = append(segs, seg)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("err: %v", err)
+func TestForEachSegment(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		dialect shellDialect
+		want    []string
+	}{
+		{
+			name:    "sh_splits_oror_and_pipe",
+			in:      "echo x || sudo ls | cat",
+			dialect: dialectSh,
+			want:    []string{"echo x", "sudo ls", "cat"},
+		},
+		{
+			name:    "sh_does_not_split_inside_quotes",
+			in:      `echo "a|b"; sudo ls`,
+			dialect: dialectSh,
+			want:    []string{`echo "a|b"`, "sudo ls"},
+		},
+		{
+			name:    "sh_hash_comment_only_when_word_startish",
+			in:      "echo hi # sudo ls; rm -rf /",
+			dialect: dialectSh,
+			want:    []string{"echo hi"},
+		},
+		{
+			name:    "powershell_hash_comment_anywhere",
+			in:      "echo hi# rm; sudo",
+			dialect: dialectPowerShell,
+			want:    []string{"echo hi"},
+		},
+		{
+			name:    "cmd_splits_ampersand_and_andand",
+			in:      "echo hi & echo bye && echo ok",
+			dialect: dialectCmd,
+			want:    []string{"echo hi", "echo bye", "echo ok"},
+		},
+		{
+			name:    "cmd_caret_escapes_metacharacters_best_effort",
+			in:      "echo hi ^& echo bye",
+			dialect: dialectCmd,
+			want:    []string{"echo hi ^& echo bye"},
+		},
 	}
-	// Expect: ["echo x", "sudo ls", "cat"].
-	if len(segs) != 3 {
-		t.Fatalf("segs=%#v", segs)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var segs []string
+			err := forEachSegment(tc.in, tc.dialect, func(seg string) error {
+				segs = append(segs, seg)
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if !reflect.DeepEqual(segs, tc.want) {
+				t.Fatalf("segments mismatch:\n got: %#v\nwant: %#v", segs, tc.want)
+			}
+		})
+	}
+}
+
+func TestRejectDangerous_HeuristicChecksToggle(t *testing.T) {
+	cases := []struct {
+		name    string
+		cmd     string
+		shell   ShellName
+		enable  bool
+		wantErr bool
+		substr  string
+	}{
+		{
+			name:    "fork_bomb_blocked_when_enabled",
+			cmd:     ":(){ :|:& };:",
+			shell:   ShellNameSh,
+			enable:  true,
+			wantErr: true,
+			substr:  "fork bomb",
+		},
+		{
+			name:    "fork_bomb_allowed_when_disabled",
+			cmd:     ":(){ :|:& };:",
+			shell:   ShellNameSh,
+			enable:  false,
+			wantErr: false,
+		},
+		{
+			name:    "background_ampersand_blocked_when_enabled",
+			cmd:     "sleep 1 &",
+			shell:   ShellNameSh,
+			enable:  true,
+			wantErr: true,
+			substr:  "background",
+		},
+		{
+			name:    "background_ampersand_allowed_when_disabled",
+			cmd:     "sleep 1 &",
+			shell:   ShellNameSh,
+			enable:  false,
+			wantErr: false,
+		},
+		{
+			name:    "hard_block_still_blocks_even_when_heuristics_disabled",
+			cmd:     "rm -rf /",
+			shell:   ShellNameSh,
+			enable:  false,
+			wantErr: true,
+			substr:  "blocked command",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := rejectDangerousCommand(tc.cmd, "/bin/sh", tc.shell, hardBlockedCommands, tc.enable)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if tc.wantErr && tc.substr != "" &&
+				!strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.substr)) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.substr)
+			}
+		})
 	}
 }
 

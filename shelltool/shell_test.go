@@ -14,20 +14,77 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
-func TestShellCommand_AutoSession_DoesNotLeakOnEarlyError(t *testing.T) {
-	st := newTestShellTool(t)
+func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
+	t.Helper()
 
-	// Force an early validation error by omitting commands.
-	_, err := st.Run(t.Context(), ShellCommandArgs{
-		Commands: nil,
-	})
-	if err == nil {
-		t.Fatalf("expected error")
+	td := t.TempDir()
+	nonexistent := filepath.Join(td, "does-not-exist")
+	outside := t.TempDir()
+
+	cases := []struct {
+		name          string
+		opts          []ShellToolOption
+		args          ShellCommandArgs
+		needsShell    bool
+		wantErrSubstr string
+	}{
+		{
+			name:          "early_error_missing_commands",
+			args:          ShellCommandArgs{Commands: nil},
+			wantErrSubstr: "commands is required",
+		},
+		{
+			name:          "workdir_does_not_exist",
+			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: nonexistent},
+			wantErrSubstr: "no such file",
+		},
+		{
+			name:          "invalid_env_map",
+			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Env: map[string]string{"": "1"}},
+			wantErrSubstr: "env",
+		},
+		{
+			name:          "invalid_shell_name",
+			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Shell: ShellName("nope")},
+			wantErrSubstr: "invalid shell",
+		},
+		{
+			name:       "command_contains_nul",
+			args:       ShellCommandArgs{Commands: []string{"echo hi\x00there"}},
+			needsShell: true, // NUL check happens after selectShell()
+			// Error text: "command contains NUL byte"
+			wantErrSubstr: "nul",
+		},
+		{
+			name: "workdir_outside_allowed_roots",
+			opts: []ShellToolOption{WithShellAllowedWorkdirRoots([]string{td})},
+			args: ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: outside},
+			// Error text: "workdir ... is outside allowed roots"
+			wantErrSubstr: "outside allowed roots",
+		},
 	}
 
-	// Ensure no leaked session.
-	if got := st.sessions.sizeForTest(); got != 0 {
-		t.Fatalf("expected no sessions left, found %d", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newTestShellTool(t, tc.opts...)
+
+			if tc.needsShell {
+				requireAnyShell(t)
+			}
+
+			_, err := st.Run(t.Context(), tc.args)
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if tc.wantErrSubstr != "" &&
+				!strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+			}
+
+			if got := st.sessions.sizeForTest(); got != 0 {
+				t.Fatalf("expected no sessions left, found %d", got)
+			}
+		})
 	}
 }
 
@@ -450,36 +507,58 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 	}
 }
 
-func TestSessions_TTL_Evicts(t *testing.T) {
-	if runtime.GOOS == toolutil.GOOSWindows {
-		t.Skip("timing tests may be flaky on some windows CI")
-	}
-	st := newTestShellTool(t,
-		WithShellSessionTTL(150*time.Millisecond),
-		WithShellMaxSessions(100),
-	)
-
-	out, err := st.Run(t.Context(), ShellCommandArgs{
-		Shell:    ShellNameSh,
-		Commands: []string{"echo hi"},
-	})
-	if err != nil {
-		t.Fatalf("Run error: %v", err)
-	}
-	resp := out
-	if resp.SessionID == "" {
-		t.Fatalf("expected session id")
+func TestSessionStore_TTL_EvictsWithoutSleep(t *testing.T) {
+	cases := []struct {
+		name      string
+		ttl       time.Duration
+		age       time.Duration
+		wantEvict bool
+	}{
+		{name: "ttl_disabled_never_evicts", ttl: 0, age: 24 * time.Hour, wantEvict: false},
+		{name: "not_old_enough", ttl: 10 * time.Second, age: 1 * time.Second, wantEvict: false},
+		{name: "old_enough", ttl: 100 * time.Millisecond, age: 2 * time.Second, wantEvict: true},
 	}
 
-	time.Sleep(250 * time.Millisecond)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ss := newSessionStore()
+			ss.setTTL(tc.ttl)
 
-	_, err = st.Run(t.Context(), ShellCommandArgs{
-		SessionID: resp.SessionID,
-		Shell:     ShellNameSh,
-		Commands:  []string{"echo hi"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "unknown sessionID") {
-		t.Fatalf("expected unknown sessionID after TTL eviction, got %v", err)
+			s := ss.newSession()
+			if s == nil || s.id == "" {
+				t.Fatalf("expected session")
+			}
+
+			// Force lastUsed to the past deterministically.
+			ss.mu.Lock()
+			e := ss.m[s.id]
+			if e == nil {
+				ss.mu.Unlock()
+				t.Fatalf("missing store entry")
+			}
+			it, _ := e.Value.(*sessionItem)
+			if it == nil {
+				ss.mu.Unlock()
+				t.Fatalf("missing sessionItem")
+			}
+			it.lastUsed = time.Now().Add(-tc.age)
+			ss.mu.Unlock()
+
+			_, ok := ss.get(s.id) // get() performs eviction check
+			if tc.wantEvict && ok {
+				t.Fatalf("expected evicted, but get() returned ok")
+			}
+			if !tc.wantEvict && !ok {
+				t.Fatalf("expected present, but get() returned !ok")
+			}
+
+			s.mu.RLock()
+			closed := s.closed
+			s.mu.RUnlock()
+			if tc.wantEvict && !closed {
+				t.Fatalf("expected closed session after eviction")
+			}
+		})
 	}
 }
 
@@ -702,6 +781,13 @@ func newTestShellTool(t *testing.T, opts ...ShellToolOption) *ShellTool {
 		t.Fatalf("NewShellTool: %v", err)
 	}
 	return st
+}
+
+func requireAnyShell(t *testing.T) {
+	t.Helper()
+	if _, err := selectShell(ShellNameAuto); err != nil {
+		t.Skipf("no suitable shell found on PATH: %v", err)
+	}
 }
 
 func mustLookPath(t *testing.T, name string) string {
