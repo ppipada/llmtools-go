@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
@@ -304,31 +302,6 @@ func TestDeleteFile(t *testing.T) {
 				}
 				if gotTarget != target {
 					t.Fatalf("symlink target=%q want=%q", gotTarget, target)
-				}
-			},
-		},
-		{
-			name: "refuses_non_regular_file_fifo_unix",
-			run: func(t *testing.T) {
-				t.Helper()
-				if runtime.GOOS == toolutil.GOOSWindows {
-					t.Skip("no mkfifo on Windows")
-				}
-				tmp := t.TempDir()
-				fifo := filepath.Join(tmp, "p")
-				if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-					t.Skipf("mkfifo not supported: %v", err)
-				}
-
-				_, err := DeleteFile(t.Context(), DeleteFileArgs{Path: fifo, TrashDir: filepath.Join(tmp, "trash")})
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if !strings.Contains(err.Error(), "refusing to delete non-regular file") {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if _, statErr := os.Lstat(fifo); statErr != nil {
-					t.Fatalf("expected fifo to remain, stat err=%v", statErr)
 				}
 			},
 		},

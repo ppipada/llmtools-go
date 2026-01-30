@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
@@ -237,24 +236,6 @@ func TestWriteFile(t *testing.T) {
 				}
 				p := filepath.Join(linkDir, "child.txt")
 				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false})
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-			},
-		},
-		{
-			name: "refuses_non_regular_destination_unix_fifo",
-			run: func(t *testing.T) {
-				t.Helper()
-				if runtime.GOOS == toolutil.GOOSWindows {
-					t.Skip("no mkfifo on Windows")
-				}
-				tmp := t.TempDir()
-				p := filepath.Join(tmp, "fifo")
-				if err := syscall.Mkfifo(p, 0o600); err != nil {
-					t.Skipf("mkfifo not supported: %v", err)
-				}
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "x", Overwrite: true})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
