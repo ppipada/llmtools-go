@@ -88,6 +88,45 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 	}
 }
 
+func TestNormalizeBlockedCommand(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         string
+		want       string
+		wantErrSub string
+	}{
+		{name: "empty_is_ok", in: "", want: ""},
+		{name: "whitespace_only_is_ok", in: " \n\t ", want: ""},
+		{name: "lowercases_and_trims", in: " RM ", want: "rm"},
+		{name: "basenames_slash", in: "/bin/rm", want: "rm"},
+		{name: "basenames_backslash", in: `C:\Windows\System32\CURL.EXE`, want: "curl.exe"},
+		{name: "trims_trailing_separators", in: "/usr/bin/rm////", want: "rm"},
+		{name: "rejects_nul", in: "rm\x00", wantErrSub: "NUL"},
+		{name: "rejects_whitespace_in_name", in: "rm -rf", wantErrSub: "whitespace"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeBlockedCommand(tc.in)
+			if tc.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSub)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNormalizedCommandList(t *testing.T) {
 	args := ShellCommandArgs{
 		Commands: []string{"", "  ", "\n", "echo a", " echo b "},

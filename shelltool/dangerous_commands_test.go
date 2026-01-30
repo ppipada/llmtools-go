@@ -252,6 +252,60 @@ func TestForEachSegment(t *testing.T) {
 	}
 }
 
+func TestRejectDangerous_PowerShell_CallOperatorAndComments(t *testing.T) {
+	cases := []struct {
+		name       string
+		cmd        string
+		wantErr    bool
+		wantSubstr string
+	}{
+		{
+			name:       "call_operator_blocks_underlying_command",
+			cmd:        `& rm -rf /`,
+			wantErr:    true,
+			wantSubstr: "rm",
+		},
+		{
+			name:       "call_operator_blocks_quoted_underlying_command",
+			cmd:        `& 'rm' -rf /`,
+			wantErr:    true,
+			wantSubstr: "rm",
+		},
+		{
+			name:    "comment_anywhere_prevents_scanning_rest",
+			cmd:     `echo hi# rm -rf /`,
+			wantErr: false,
+		},
+		{
+			name:    "quoted_hash_is_not_a_comment",
+			cmd:     `echo "# rm -rf /"`,
+			wantErr: false,
+		},
+		{
+			name:       "semicolon_splits_segments",
+			cmd:        `echo hi; rm -rf /`,
+			wantErr:    true,
+			wantSubstr: "rm",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := rejectDangerousCommand(tc.cmd, "pwsh", ShellNamePwsh, hardBlockedCommands, true)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("did not expect error: %v", err)
+			}
+			if tc.wantErr && tc.wantSubstr != "" &&
+				!strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantSubstr)) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantSubstr)
+			}
+		})
+	}
+}
+
 func TestRejectDangerous_HeuristicChecksToggle(t *testing.T) {
 	cases := []struct {
 		name    string
