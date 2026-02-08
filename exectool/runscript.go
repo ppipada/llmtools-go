@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -29,7 +31,7 @@ var runScriptToolSpec = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Path to the script. Can be absolute or relative. Relative paths try to resolve against input workdir if provided, else resolves against the tool workBaseDir."
+		"description": "Path to the script. Can be absolute or relative. If relative and workdir is provided, resolves against workdir; otherwise resolves against the tool workBaseDir."
 	},
 	"args": {
 		"type": "array",
@@ -74,17 +76,48 @@ type RunScriptResult struct {
 	StderrTruncated bool `json:"stderr_truncated,omitempty"`
 }
 
+type RunScriptMode string
+
+const (
+	// RunScriptModeDirect executes the script path directly (as the "command").
+	// This is appropriate for PowerShell scripts executed via "& 'script.ps1' ...".
+	RunScriptModeDirect RunScriptMode = "direct"
+
+	// RunScriptModeShell executes the script by invoking the selected wrapper shell as an interpreter:
+	//   <shellPath> <script> <args...>
+	// This avoids requiring execute bits on Unix shell scripts.
+	RunScriptModeShell RunScriptMode = "shell"
+
+	// RunScriptModeInterpreter executes the script via an explicit interpreter command:
+	//   <command> <commandArgs...> <script> <args...>
+	RunScriptModeInterpreter RunScriptMode = "interpreter"
+)
+
+type RunScriptInterpreter struct {
+	// Shell selects the wrapper shell used to run the *constructed command string*.
+	// This affects quoting dialect and which binary is used for "shell -c" / "-Command".
+	Shell ShellName
+
+	Mode RunScriptMode
+
+	// Command is required for ModeInterpreter.
+	// Examples: "python3", "python", "node", "ruby".
+	Command string
+	Args    []string
+}
+
 type RunScriptPolicy struct {
-	// RequireUnderDir, if non-empty, requires args.Path to be under this relative directory (default: "scripts").
-	RequireUnderDir string
-
-	// On Windows, a ".sh" script may still work if "sh" exists (e.g. Git Bash), but extension mapping above is
-	// conservative.
-	// If needed, host apps can expand RunScriptPolicy.AllowedExtensions and add more interpreter mappings later.
-
-	// AllowedExtensions is a lowercase allowlist (e.g. [".sh", ".ps1"]).
-	// If empty/nil, extension is not restricted (but interpreter inference may still fail).
+	// AllowedExtensions is an optional lowercase allowlist (e.g. [".sh", ".ps1", ".py"]).
+	// If empty/nil, extension is allowed iff InterpreterByExtension has a match (or a "" fallback is configured).
 	AllowedExtensions []string
+
+	// InterpreterByExtension controls how scripts are executed based on extension.
+	// Keys should be lowercase and include the leading dot (".sh", ".ps1", ".py").
+	//
+	// If no mapping exists for the script extension:
+	//   - if a mapping for "" exists, it is used as a fallback
+	//   - otherwise runscript fails with "no interpreter mapping for extension"
+	InterpreterByExtension map[string]RunScriptInterpreter
 
 	// ExecutionPolicy overrides the ExecTool-wide defaults for runscript.
 	// If left zero-valued, ExecTool.execPolicy is used.
@@ -95,12 +128,34 @@ type RunScriptPolicy struct {
 	MaxArgBytes int
 }
 
-var DefaultRunScriptPolicy = RunScriptPolicy{
-	AllowedExtensions: []string{".sh", ".bash", ".zsh", ".ksh", ".dash", ".ps1"},
-	ExecutionPolicy:   ExecutionPolicy{}, // inherit from ExecTool by default
-	MaxArgs:           256,
-	MaxArgBytes:       16 * 1024,
-}
+var DefaultRunScriptPolicy = func() RunScriptPolicy {
+	pyCmd := "python3"
+	pyShell := ShellNameSh
+	if runtime.GOOS == toolutil.GOOSWindows {
+		pyCmd = "python"
+		pyShell = ShellNamePowershell
+	}
+	return RunScriptPolicy{
+		AllowedExtensions: []string{".sh", ".bash", ".zsh", ".ksh", ".dash", ".ps1", ".py"},
+		InterpreterByExtension: map[string]RunScriptInterpreter{
+			// Shell scripts: run via the wrapper shell path as interpreter.
+			".sh":   {Shell: ShellNameSh, Mode: RunScriptModeShell},
+			".bash": {Shell: ShellNameBash, Mode: RunScriptModeShell},
+			".zsh":  {Shell: ShellNameZsh, Mode: RunScriptModeShell},
+			".ksh":  {Shell: ShellNameKsh, Mode: RunScriptModeShell},
+			".dash": {Shell: ShellNameDash, Mode: RunScriptModeShell},
+
+			// PowerShell: execute the script directly via PowerShell dialect ("& 'script.ps1' ...").
+			".ps1": {Shell: ShellNamePowershell, Mode: RunScriptModeDirect},
+
+			// Python: interpreter-based.
+			".py": {Shell: pyShell, Mode: RunScriptModeInterpreter, Command: pyCmd},
+		},
+		ExecutionPolicy: ExecutionPolicy{}, // inherit from ExecTool by default
+		MaxArgs:         256,
+		MaxArgBytes:     16 * 1024,
+	}
+}()
 
 func runScript(
 	ctx context.Context,
@@ -119,10 +174,28 @@ func runScript(
 	if reqPath == "" {
 		return nil, errors.New("path is required")
 	}
+	// Workdir: absolute or relative; default to workBaseDir.
+	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Workdir, workBaseDir)
+	if err != nil {
+		return nil, err
+	}
+	workdirAbs, err = fileutil.GetEffectiveWorkDir(workdirAbs, allowedRoots)
+	if err != nil {
+		return nil, err
+	}
+	if err := fileutil.VerifyDirNoSymlink(workdirAbs); err != nil {
+		return nil, err
+	}
+
 	// Resolve script path:
 	// - relative => workBaseDir
 	// - absolute => must still be within allowedRoots (if configured).
-	scriptAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, reqPath, "")
+	// If relative and workdir provided, resolve relative to workdir.
+	baseForScript := workBaseDir
+	if strings.TrimSpace(args.Workdir) != "" && !filepath.IsAbs(reqPath) {
+		baseForScript = workdirAbs
+	}
+	scriptAbs, err := fileutil.ResolvePath(baseForScript, allowedRoots, reqPath, "")
 	if err != nil {
 		return nil, err
 	}
@@ -135,19 +208,6 @@ func runScript(
 	ext := strings.ToLower(filepath.Ext(scriptAbs))
 	if len(pol.AllowedExtensions) != 0 && !extAllowed(ext, pol.AllowedExtensions) {
 		return nil, fmt.Errorf("script extension %q is not allowed", ext)
-	}
-
-	// Workdir: absolute or relative; default to workBaseDir.
-	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Workdir, workBaseDir)
-	if err != nil {
-		return nil, err
-	}
-	workdirAbs, err = fileutil.GetEffectiveWorkDir(workdirAbs, allowedRoots)
-	if err != nil {
-		return nil, err
-	}
-	if err := fileutil.VerifyDirNoSymlink(workdirAbs); err != nil {
-		return nil, err
 	}
 
 	// Validate env + args.
@@ -170,16 +230,41 @@ func runScript(
 		}
 	}
 
-	// Choose shell based on extension and build a safely-quoted command using executil.CommandFromArgv.
-	requestedShell, err := shellForScriptExt(ext)
+	interp, ok := lookupInterpreter(pol, ext)
+	if !ok {
+		return nil, fmt.Errorf("no interpreter mapping for extension %q", ext)
+	}
+
+	// Select wrapper shell (concrete shell needed for quoting + execution).
+	sel, err := selectShell(interp.Shell)
 	if err != nil {
 		return nil, err
 	}
-	sel, err := selectShell(requestedShell)
-	if err != nil {
-		return nil, err
+
+	// Build argv based on mode.
+	var argv []string
+	switch interp.Mode {
+	case RunScriptModeDirect:
+		// Execute script path directly.
+		argv = append([]string{scriptAbs}, args.Args...)
+	case RunScriptModeShell:
+		// Use the wrapper shell binary as the interpreter.
+		argv = append([]string{sel.Path, scriptAbs}, args.Args...)
+	case RunScriptModeInterpreter:
+		cmd := strings.TrimSpace(interp.Command)
+		if cmd == "" {
+			return nil, errors.New("invalid interpreter mapping: empty command")
+		}
+		argv = append(argv, cmd)
+		argv = append(argv, interp.Args...)
+		argv = append(argv, scriptAbs)
+		argv = append(argv, args.Args...)
+	default:
+		return nil, fmt.Errorf("invalid interpreter mode: %q", interp.Mode)
 	}
-	cmdStr, err := buildScriptCommand(sel, scriptAbs, args.Args)
+
+	// Convert argv into a safely-quoted command string for the selected wrapper shell.
+	cmdStr, err := executil.CommandFromArgv(sel.Name, argv)
 	if err != nil {
 		return nil, err
 	}
@@ -250,29 +335,17 @@ func extAllowed(ext string, allowed []string) bool {
 	return false
 }
 
-func shellForScriptExt(ext string) (ShellName, error) {
-	switch strings.ToLower(ext) {
-	case ".ps1":
-		// Request "powershell" so resolveShell prefers pwsh but can fall back to Windows PowerShell.
-		return ShellNamePowershell, nil
-	case ".sh", ".bash", ".zsh", ".ksh", ".dash":
-		return ShellNameSh, nil
-	default:
-		return "", fmt.Errorf("no shell mapping for script extension %q", ext)
+func lookupInterpreter(pol RunScriptPolicy, ext string) (RunScriptInterpreter, bool) {
+	if pol.InterpreterByExtension == nil {
+		return RunScriptInterpreter{}, false
 	}
-}
-
-func buildScriptCommand(sel executil.SelectedShell, scriptAbs string, scriptArgs []string) (string, error) {
-	switch sel.Name {
-	case ShellNamePwsh, ShellNamePowershell:
-		// In PowerShell, run the script via call operator.
-		argv := append([]string{scriptAbs}, scriptArgs...)
-		return executil.CommandFromArgv(sel.Name, argv)
-	default:
-		// In sh-like shells, invoke the selected shell binary as the interpreter.
-		// This avoids requiring the script file to have executable bits.
-		// (Yes, this spawns an extra shell layer; it's deliberate for consistent behavior.)
-		argv := append([]string{sel.Path, scriptAbs}, scriptArgs...)
-		return executil.CommandFromArgv(sel.Name, argv)
+	// Exact match.
+	if v, ok := pol.InterpreterByExtension[strings.ToLower(ext)]; ok {
+		return v, true
 	}
+	// Optional fallback for extension-less scripts / shebang-style files.
+	if v, ok := pol.InterpreterByExtension[""]; ok {
+		return v, true
+	}
+	return RunScriptInterpreter{}, false
 }
