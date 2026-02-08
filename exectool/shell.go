@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -175,7 +176,7 @@ func WithShellBlockedCommands(cmds []string) ShellToolOption {
 // Roots are canonicalized (clean+abs) and must exist as directories.
 func WithShellAllowedWorkdirRoots(roots []string) ShellToolOption {
 	return func(st *ShellTool) error {
-		canon, err := executil.CanonicalizeAllowedRoots(roots)
+		canon, err := fileutil.CanonicalizeAllowedRoots(roots)
 		if err != nil {
 			return err
 		}
@@ -225,7 +226,7 @@ func (st *ShellTool) Tool() spec.Tool { return toolutil.CloneTool(shellToolSpec)
 // SetAllowedWorkdirRoots allows changing workdir roots at runtime (best-effort).
 // Existing sessions whose workdir falls outside the new roots will fail when used.
 func (st *ShellTool) SetAllowedWorkdirRoots(roots []string) error {
-	canon, err := executil.CanonicalizeAllowedRoots(roots)
+	canon, err := fileutil.CanonicalizeAllowedRoots(roots)
 	if err != nil {
 		return err
 	}

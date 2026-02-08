@@ -1,48 +1,9 @@
 package executil
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
-	td := t.TempDir()
-	id := newSessionID()
-	s := &ShellSession{
-		id:      id,
-		workdir: "",
-		env:     map[string]string{},
-	}
-
-	got, err := canonicalWorkdir(td)
-	if err != nil {
-		t.Fatalf("canonicalWorkdir error: %v", err)
-	}
-	if !filepath.IsAbs(got) {
-		t.Fatalf("expected abs path, got: %q", got)
-	}
-	if err := ensureDirExists(got); err != nil {
-		t.Fatalf("ensureDirExists error: %v", err)
-	}
-
-	// Not a directory.
-	f := filepath.Join(td, "f")
-	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	_, err = s.GetEffectiveWorkdir(f, nil)
-	if err == nil || !strings.Contains(err.Error(), "not a directory") {
-		t.Fatalf("expected not-a-directory error, got: %v", err)
-	}
-
-	// NUL check.
-	_, err = canonicalWorkdir("bad\x00path")
-	if err == nil || !strings.Contains(err.Error(), "NUL") {
-		t.Fatalf("expected NUL error, got: %v", err)
-	}
-}
 
 func TestValidateEnvMap(t *testing.T) {
 	if err := ValidateEnvMap(map[string]string{"OK": "1"}); err != nil {

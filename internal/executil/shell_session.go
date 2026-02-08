@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -141,69 +141,38 @@ func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string
 	return out, nil
 }
 
-func (sess *ShellSession) GetEffectiveWorkdir(arg string, allowedRoots []string) (string, error) {
-	if strings.TrimSpace(arg) != "" {
-		p, err := canonicalWorkdir(arg)
+func (sess *ShellSession) GetEffectiveWorkdir(inputWorkDir string, allowedRoots []string) (string, error) {
+	if sess == nil {
+		return "", errors.New("invalid session")
+	}
+	sess.mu.RLock()
+	wd := sess.workdir
+	closed := sess.closed
+	sess.mu.RUnlock()
+	if closed {
+		return "", errors.New("session is closed")
+	}
+
+	var checkWorkDir string
+	if strings.TrimSpace(inputWorkDir) != "" { //nolint:gocritic // Dont want this to be a switch.
+		checkWorkDir = inputWorkDir
+	} else if strings.TrimSpace(wd) != "" {
+		checkWorkDir = wd
+	} else {
+		cwd, err := os.Getwd()
 		if err != nil {
 			return "", err
 		}
-		if err := ensureDirExists(p); err != nil {
-			return "", err
-		}
-		if err := ensureWorkdirAllowed(p, allowedRoots); err != nil {
-			return "", err
-		}
-		return p, nil
+		checkWorkDir = cwd
 	}
-	if sess != nil {
-		sess.mu.RLock()
-		wd := sess.workdir
-		closed := sess.closed
-		sess.mu.RUnlock()
-		if closed {
-			return "", errors.New("session is closed")
-		}
-		if strings.TrimSpace(wd) != "" {
-			p, err := canonicalWorkdir(wd)
-			if err != nil {
-				return "", err
-			}
-			if err := ensureDirExists(p); err != nil {
-				return "", err
-			}
-			if err := ensureWorkdirAllowed(p, allowedRoots); err != nil {
-				return "", err
-			}
-			return p, nil
-
-		}
+	if checkWorkDir == "" {
+		return "", errors.New("got invalid workdir")
 	}
-	cwd, err := os.Getwd()
+	p, err := fileutil.GetEffectiveWorkDir(checkWorkDir, allowedRoots)
 	if err != nil {
 		return "", err
 	}
-	if err := ensureWorkdirAllowed(cwd, allowedRoots); err != nil {
-		return "", err
-	}
-	return cwd, nil
-}
-
-func CanonicalizeAllowedRoots(roots []string) ([]string, error) {
-	var out []string
-	for _, r := range roots {
-		if strings.TrimSpace(r) == "" {
-			continue
-		}
-		cr, err := canonicalWorkdir(r)
-		if err != nil {
-			return nil, fmt.Errorf("invalid allowed root %q: %w", r, err)
-		}
-		if err := ensureDirExists(cr); err != nil {
-			return nil, fmt.Errorf("invalid allowed root %q: %w", r, err)
-		}
-		out = append(out, cr)
-	}
-	return out, nil
+	return p, nil
 }
 
 func ValidateEnvMap(m map[string]string) error {
@@ -234,64 +203,4 @@ func canonicalEnvKey(k string) string {
 		return strings.ToUpper(k)
 	}
 	return k
-}
-
-func ensureDirExists(p string) error {
-	st, err := os.Stat(p)
-	if err != nil {
-		return errors.Join(err, errors.New("no such dir"))
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("workdir is not a directory: %s", p)
-	}
-	return nil
-}
-
-func canonicalWorkdir(p string) (string, error) {
-	if strings.ContainsRune(p, '\x00') {
-		return "", errors.New("workdir contains NUL byte")
-	}
-	cleaned := filepath.Clean(p)
-	abs, err := filepath.Abs(cleaned)
-	if err != nil {
-		return "", err
-	}
-	// Best-effort: resolve symlinks to avoid platform-dependent aliases
-	// (e.g. macOS /var -> /private/var) and to harden allowed-root checks.
-	// If resolution fails (odd FS / permissions), keep the absolute path.
-	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil && resolved != "" {
-		abs = resolved
-	}
-	return abs, nil
-}
-
-func ensureWorkdirAllowed(p string, roots []string) error {
-	if len(roots) == 0 {
-		return nil
-	}
-	for _, r := range roots {
-		ok, err := pathWithinRoot(r, p)
-		if err != nil {
-			continue
-		}
-		if ok {
-			return nil
-		}
-	}
-	return fmt.Errorf("workdir %q is outside allowed roots", p)
-}
-
-func pathWithinRoot(root, p string) (bool, error) {
-	rel, err := filepath.Rel(root, p)
-	if err != nil {
-		return false, err
-	}
-	rel = filepath.Clean(rel)
-	if rel == "." {
-		return true, nil
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false, nil
-	}
-	return true, nil
 }
