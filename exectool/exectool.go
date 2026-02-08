@@ -174,11 +174,18 @@ func (et *ExecTool) SetWorkBaseDir(base string) error {
 
 	b := strings.TrimSpace(base)
 	if b == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
+		// Mirror InitPathPolicy behavior:
+		// if a sandbox is configured, default base to the first allowed root;
+		// otherwise default to process CWD.
+		if len(roots) > 0 {
+			b = roots[0]
+		} else {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			b = cwd
 		}
-		b = cwd
 	}
 	eff, err := fileutil.GetEffectiveWorkDir(b, roots)
 	if err != nil {

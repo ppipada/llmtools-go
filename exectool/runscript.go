@@ -268,6 +268,27 @@ func runScript(
 	if err != nil {
 		return nil, err
 	}
+	cmdStrExec, cmdStrCheck := cmdStr, cmdStr
+
+	// PowerShell/Pwsh: when running external commands or scripts via "-Command",
+	// use the call operator (&). Without it, script execution often fails, and
+	// executable paths with spaces can fail.
+	//
+	// But for safety checks (blocklist/heuristics), we want the command string
+	// without the leading '&' so parsers don't treat '&' as the "command".
+	if sel.Name == ShellNamePwsh || sel.Name == ShellNamePowershell {
+		trimmed := strings.TrimSpace(cmdStr)
+		if !strings.HasPrefix(trimmed, "&") {
+			cmdStrExec = "& " + trimmed
+			cmdStrCheck = trimmed
+		} else {
+			cmdStrExec = trimmed
+			cmdStrCheck = strings.TrimSpace(strings.TrimPrefix(trimmed, "&"))
+			if cmdStrCheck == "" {
+				cmdStrCheck = trimmed
+			}
+		}
+	}
 
 	// Effective execution policy: runscript overrides or inherit ExecTool default.
 	execPol := pol.ExecutionPolicy
@@ -288,7 +309,7 @@ func runScript(
 
 	// Apply the same outer-command checks (blocklist always, heuristics optional).
 	if err := executil.RejectDangerousCommand(
-		cmdStr,
+		cmdStrCheck,
 		sel.Path,
 		sel.Name,
 		blocked,
@@ -297,7 +318,7 @@ func runScript(
 		return nil, err
 	}
 
-	res, runErr := executil.RunOneShellCommand(ctx, sel, cmdStr, workdirAbs, env, timeout, maxOut)
+	res, runErr := executil.RunOneShellCommand(ctx, sel, cmdStrExec, workdirAbs, env, timeout, maxOut)
 	if runErr != nil {
 		return &RunScriptResult{ //nolint:nilerr // For shell exec, we return a exit code on err.
 			Path:     scriptAbs,
@@ -320,12 +341,19 @@ func runScript(
 }
 
 func extAllowed(ext string, allowed []string) bool {
-	if ext == "" {
-		return false
-	}
 	if len(allowed) == 0 {
 		return false
 	}
+	// Allow extension-less scripts if explicitly configured.
+	if strings.TrimSpace(ext) == "" {
+		for _, a := range allowed {
+			if strings.TrimSpace(strings.ToLower(a)) == "" {
+				return true
+			}
+		}
+		return false
+	}
+
 	x := strings.ToLower(ext)
 	for _, a := range allowed {
 		if strings.ToLower(strings.TrimSpace(a)) == x {
