@@ -134,19 +134,24 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 
-	if err := RegisterTypedAsTextTool(r, texttool.ReadTextRangeTool(), texttool.ReadTextRange); err != nil {
+	tt, err := texttool.NewTextTool()
+	if err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, texttool.FindTextTool(), texttool.FindText); err != nil {
+
+	if err := RegisterTypedAsTextTool(r, tt.ReadTextRangeTool(), tt.ReadTextRange); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, texttool.InsertTextLinesTool(), texttool.InsertTextLines); err != nil {
+	if err := RegisterTypedAsTextTool(r, tt.FindTextTool(), tt.FindText); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, texttool.ReplaceTextLinesTool(), texttool.ReplaceTextLines); err != nil {
+	if err := RegisterTypedAsTextTool(r, tt.InsertTextLinesTool(), tt.InsertTextLines); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, texttool.DeleteTextLinesTool(), texttool.DeleteTextLines); err != nil {
+	if err := RegisterTypedAsTextTool(r, tt.ReplaceTextLinesTool(), tt.ReplaceTextLines); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, tt.DeleteTextLinesTool(), tt.DeleteTextLines); err != nil {
 		return err
 	}
 

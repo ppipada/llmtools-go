@@ -27,7 +27,7 @@ var deleteTextLinesTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute path of the UTF-8 text file."
+		"description": "Path of the UTF-8 text file."
 	},
 	"matchLines": {
 		"type": "array",
@@ -64,10 +64,6 @@ var deleteTextLinesTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func DeleteTextLinesTool() spec.Tool {
-	return toolutil.CloneTool(deleteTextLinesTool)
-}
-
 type DeleteTextLinesArgs struct {
 	Path              string   `json:"path"`
 	MatchLines        []string `json:"matchLines"`
@@ -81,24 +77,23 @@ type DeleteTextLinesOut struct {
 	DeletedAtLines []int `json:"deletedAtLines"` // 1-based start line of each deleted block
 }
 
-// DeleteTextLines deletes occurrences of MatchLines from a UTF‑8 file.
+// deleteTextLines deletes occurrences of MatchLines from a UTF‑8 file.
 // Behavior notes (entry point):
 //   - The file must exist, be a regular file, not a symlink, and be valid UTF‑8.
 //   - Matching is line-wise using strings.TrimSpace on each line.
 //   - If ExpectedDeletions is set, the tool fails unless exactly that many deletions would be made.
 //   - Writes are atomic (temp file + fsync + rename) and preserve newline style and final newline.
-func DeleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteTextLinesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*DeleteTextLinesOut, error) {
-		return deleteTextLines(ctx, args)
-	})
-}
-
-func deleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteTextLinesOut, error) {
+func deleteTextLines(
+	ctx context.Context,
+	args DeleteTextLinesArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*DeleteTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizeAbsPath(args.Path)
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

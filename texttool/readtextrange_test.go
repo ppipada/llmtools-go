@@ -131,7 +131,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "range-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := ReadTextRange(t.Context(), args)
+			out, err := readTextRange(t.Context(), args, "", nil)
 			mustNoErr(t, err)
 			if len(out.Lines) != out.LinesReturned {
 				t.Fatalf("invariant failed: len(Lines)=%d but LinesReturned=%d", len(out.Lines), out.LinesReturned)
@@ -173,17 +173,6 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 		wantErrSub string
 		wantIsCtx  bool
 	}{
-		{
-			name: "path_must_be_absolute",
-			setup: func() string {
-				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
-				return relativeTxt
-			},
-			args: func(path string) ReadTextRangeArgs {
-				return ReadTextRangeArgs{Path: path}
-			},
-			wantErrSub: "path must be absolute",
-		},
 		{
 			name: "no_match_startMarker",
 			setup: func() string {
@@ -273,7 +262,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := ReadTextRange(ctx, args)
+			_, err := readTextRange(ctx, args, "", nil)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

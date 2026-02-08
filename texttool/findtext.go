@@ -29,7 +29,7 @@ var findTextTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute path of the UTF-8 text file."
+		"description": "Path of the UTF-8 text file."
 	},
 	"queryType": {
 		"type": "string",
@@ -89,8 +89,6 @@ var findTextTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func FindTextTool() spec.Tool { return toolutil.CloneTool(findTextTool) }
-
 const (
 	findTypeSubstring = "substring"
 	findTypeRegex     = "regex"
@@ -135,25 +133,19 @@ type FindTextOut struct {
 	Matches           []FindTextMatch `json:"matches"`
 }
 
-// FindText finds occurrences and returns matches with context.
+// findText finds occurrences and returns matches with context.
 // Behavior notes (entry point):
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
 //   - Matching uses TrimSpace per line for both file and input blocks.
 //   - Returned lines are original file lines (not trimmed).
 //   - Deterministic: matches are returned in ascending file order up to maxMatches.
 //   - For queryType=lineBlock, overlapping matches are rejected.
-func FindText(ctx context.Context, args FindTextArgs) (*FindTextOut, error) {
-	return toolutil.WithRecoveryResp(func() (*FindTextOut, error) {
-		return findText(ctx, args)
-	})
-}
-
-func findText(ctx context.Context, args FindTextArgs) (*FindTextOut, error) {
+func findText(ctx context.Context, args FindTextArgs, workBaseDir string, allowedRoots []string) (*FindTextOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizeAbsPath(args.Path)
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

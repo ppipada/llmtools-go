@@ -28,7 +28,7 @@ var replaceTextLinesTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute path of the UTF-8 text file."
+		"description": "Path of the UTF-8 text file."
 	},
 	"matchLines": {
 		"type": "array",
@@ -69,8 +69,6 @@ var replaceTextLinesTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ReplaceTextLinesTool() spec.Tool { return toolutil.CloneTool(replaceTextLinesTool) }
-
 type ReplaceTextLinesArgs struct {
 	Path string `json:"path"`
 
@@ -92,7 +90,7 @@ type ReplaceTextLinesOut struct {
 	ReplacedAtLines  []int `json:"replacedAtLines"` // 1-based start line of each replacement
 }
 
-// ReplaceTextLines replaces occurrences of MatchLines in a UTF‑8 file.
+// replaceTextLines replaces occurrences of MatchLines in a UTF‑8 file.
 //
 // Behavior notes (entry point):
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
@@ -101,18 +99,17 @@ type ReplaceTextLinesOut struct {
 //   - Deterministic / no ambiguity: fails unless match count == expectedReplacements (default 1, minimum 1).
 //   - Deletion is not supported here; use deletetextlines.
 //   - Writes are atomic and preserve newline style and final newline presence.
-func ReplaceTextLines(ctx context.Context, args ReplaceTextLinesArgs) (*ReplaceTextLinesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*ReplaceTextLinesOut, error) {
-		return replaceTextLines(ctx, args)
-	})
-}
-
-func replaceTextLines(ctx context.Context, args ReplaceTextLinesArgs) (*ReplaceTextLinesOut, error) {
+func replaceTextLines(
+	ctx context.Context,
+	args ReplaceTextLinesArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*ReplaceTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizeAbsPath(args.Path)
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

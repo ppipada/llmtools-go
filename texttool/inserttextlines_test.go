@@ -155,7 +155,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "insert-*.txt", tt.initial)
 			tt.args.Path = path
 
-			out, err := InsertTextLines(t.Context(), tt.args)
+			out, err := insertTextLines(t.Context(), tt.args, "", nil)
 			mustNoErr(t, err)
 
 			got := readFileString(t, path)
@@ -202,17 +202,6 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 		checkContentAfter bool
 		wantContentAfter  string
 	}{
-		{
-			name: "path_must_be_absolute",
-			setupFile: func() string {
-				_ = writeTempTextFile(t, dir, "dummy-*.txt", "A\n")
-				return relativeTxt
-			},
-			args: func(path string) InsertTextLinesArgs {
-				return InsertTextLinesArgs{Path: path, LinesToInsert: []string{"X"}}
-			},
-			wantErrSub: "path must be absolute",
-		},
 		{
 			name: "linesToInsert_required",
 			setupFile: func() string {
@@ -338,7 +327,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := InsertTextLines(ctx, args)
+			_, err := insertTextLines(ctx, args, "", nil)
 			if strings.Contains(tt.name, "context_canceled") {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

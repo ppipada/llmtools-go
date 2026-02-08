@@ -8,8 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-const relativeTxt = "relative.txt"
-
 // Small OS wrappers to keep this file stdlib-only without extra imports in header
 // (and to avoid unused imports in non-symlink environments).
 func filepathSep() rune { r, _ := utf8.DecodeRuneInString(string(os.PathSeparator)); return r }

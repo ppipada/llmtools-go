@@ -137,7 +137,7 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "del-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := DeleteTextLines(t.Context(), args)
+			out, err := deleteTextLines(t.Context(), args, "", nil)
 			mustNoErr(t, err)
 
 			if out.DeletionsMade != tt.wantDeletions {
@@ -177,18 +177,6 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 		checkContentAfter bool
 		wantContentAfter  string
 	}{
-		{
-			name: "path_must_be_absolute",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
-				return relativeTxt
-			},
-			args: func(path string) DeleteTextLinesArgs {
-				return DeleteTextLinesArgs{Path: path, MatchLines: []string{"A"}}
-			},
-			wantErrSub: "path must be absolute",
-		},
 		{
 			name: "matchLines_required",
 			setup: func(t *testing.T) string {
@@ -306,7 +294,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := DeleteTextLines(ctx, args)
+			_, err := deleteTextLines(ctx, args, "", nil)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

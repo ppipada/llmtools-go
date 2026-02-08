@@ -120,7 +120,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "repl-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := ReplaceTextLines(t.Context(), args)
+			out, err := replaceTextLines(t.Context(), args, "", nil)
 			mustNoErr(t, err)
 			if out.ReplacementsMade != len(out.ReplacedAtLines) {
 				t.Fatalf(
@@ -167,17 +167,6 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 		checkContentAfter bool
 		wantContentAfter  string
 	}{
-		{
-			name: "path_must_be_absolute",
-			setup: func() string {
-				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
-				return relativeTxt
-			},
-			args: func(path string) ReplaceTextLinesArgs {
-				return ReplaceTextLinesArgs{Path: path, MatchLines: []string{"A"}, ReplaceWithLines: []string{"X"}}
-			},
-			wantErrSub: "path must be absolute",
-		},
 		{
 			name: "matchLines_required",
 			setup: func() string {
@@ -300,7 +289,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := ReplaceTextLines(ctx, args)
+			_, err := replaceTextLines(ctx, args, "", nil)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

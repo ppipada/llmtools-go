@@ -29,7 +29,7 @@ var readTextRangeTool = spec.Tool{
 "properties": {
 "path": {
 	"type": "string",
-	"description": "Absolute path of the UTF-8 text file."
+	"description": "Path of the UTF-8 text file."
 },
 "startMatchLines": {
 	"type": "array",
@@ -54,8 +54,6 @@ var readTextRangeTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ReadTextRangeTool() spec.Tool { return toolutil.CloneTool(readTextRangeTool) }
-
 // Hard cap to keep tool responses bounded (prevents massive JSON payloads).
 // If the selected range exceeds this, the tool fails (no truncation).
 const maxReadTextRangeOutputLines = 2000
@@ -79,7 +77,7 @@ type ReadTextRangeOut struct {
 	Lines         []ReadTextRangeLine `json:"lines"`
 }
 
-// ReadTextRange reads a UTF‑8 file and returns a bounded range of lines.
+// readTextRange reads a UTF‑8 file and returns a bounded range of lines.
 //
 // Behavior notes (entry point):
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
@@ -89,18 +87,17 @@ type ReadTextRangeOut struct {
 //   - endMatchLines (if provided) must match exactly once.
 //   - if both are provided, end must occur after start block (non-overlapping).
 //   - If the selected range exceeds maxReadTextRangeOutputLines, the tool fails.
-func ReadTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeOut, error) {
-	return toolutil.WithRecoveryResp(func() (*ReadTextRangeOut, error) {
-		return readTextRange(ctx, args)
-	})
-}
-
-func readTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeOut, error) {
+func readTextRange(
+	ctx context.Context,
+	args ReadTextRangeArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*ReadTextRangeOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizeAbsPath(args.Path)
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

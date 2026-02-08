@@ -11,7 +11,10 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttextlines.InsertTextLines"
+const (
+	insertTextLinesFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/texttool/inserttextlines.InsertTextLines"
+	whereEnd              string      = "end"
+)
 
 var insertTextLinesTool = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
@@ -28,7 +31,7 @@ var insertTextLinesTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute path of the UTF-8 text file."
+		"description": "Path of the UTF-8 text file."
 	},
 	"position": {
 		"type": "string",
@@ -76,10 +79,6 @@ var insertTextLinesTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func InsertTextLinesTool() spec.Tool {
-	return toolutil.CloneTool(insertTextLinesTool)
-}
-
 type InsertTextLinesArgs struct {
 	Path             string   `json:"path"`
 	Position         string   `json:"position,omitempty"` // default "end"
@@ -93,26 +92,23 @@ type InsertTextLinesOut struct {
 	AnchorMatchedAtLine *int `json:"anchorMatchedAtLine,omitempty"` // 1-based start line of anchor block
 }
 
-// InsertTextLines inserts LinesToInsert into a UTF‑8 file.
+// insertTextLines inserts LinesToInsert into a UTF‑8 file.
 // Behavior notes (entry point):
 //   - File must exist, be regular, not a symlink, and valid UTF‑8.
 //   - Matching is line-wise using strings.TrimSpace.
 //   - For beforeAnchor/afterAnchor: the anchor block must match exactly once; otherwise it fails.
 //   - Writes are atomic and preserve newline style and final newline presence.
-func InsertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertTextLinesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*InsertTextLinesOut, error) {
-		return insertTextLines(ctx, args)
-	})
-}
-
-const whereEnd = "end"
-
-func insertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertTextLinesOut, error) {
+func insertTextLines(
+	ctx context.Context,
+	args InsertTextLinesArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*InsertTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	path, err := fileutil.NormalizeAbsPath(args.Path)
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

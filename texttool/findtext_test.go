@@ -226,7 +226,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "find-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := FindText(t.Context(), args)
+			out, err := findText(t.Context(), args, "", nil)
 			mustNoErr(t, err)
 			if out.MatchesReturned != len(out.Matches) {
 				t.Fatalf("invariant failed: MatchesReturned=%d len(Matches)=%d", out.MatchesReturned, len(out.Matches))
@@ -254,18 +254,6 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 		wantErrSub string
 		wantIsCtx  bool
 	}{
-		{
-			name: "path_must_be_absolute",
-			setup: func(t *testing.T) string {
-				t.Helper()
-				_ = writeTempTextFile(t, dir, "x-*.txt", "A\n")
-				return relativeTxt
-			},
-			args: func(path string) FindTextArgs {
-				return FindTextArgs{Path: path, QueryType: "substring", Query: "A"}
-			},
-			wantErrSub: "path must be absolute",
-		},
 		{
 			name: "invalid_queryType",
 			setup: func(t *testing.T) string {
@@ -528,7 +516,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := FindText(ctx, args)
+			_, err := findText(ctx, args, "", nil)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)
