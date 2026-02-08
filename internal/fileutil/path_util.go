@@ -20,6 +20,34 @@ var errWindowsDriveRelativePath = errors.New(
 	"windows drive-relative paths like `C:foo` are not supported; use `C:\\foo` or a relative path without a drive letter",
 )
 
+// InitPathPolicy canonicalizes allowedRoots and computes an effective workBaseDir.
+//
+// Behavior:
+//   - allowedRoots == nil/empty => allow all (canonRoots will be nil/empty)
+//   - workBaseDir blank => defaults to current process working directory
+//   - returned effectiveBase is canonicalized and guaranteed to exist and (if roots set) be within roots
+func InitPathPolicy(workBaseDir string, allowedRoots []string) (effectiveBase string, canonRoots []string, err error) {
+	canonRoots, err = CanonicalizeAllowedRoots(allowedRoots)
+	if err != nil {
+		return "", nil, err
+	}
+
+	base := strings.TrimSpace(workBaseDir)
+	if base == "" {
+		cwd, e := os.Getwd()
+		if e != nil {
+			return "", nil, e
+		}
+		base = cwd
+	}
+
+	effectiveBase, err = GetEffectiveWorkDir(base, canonRoots)
+	if err != nil {
+		return "", nil, err
+	}
+	return effectiveBase, canonRoots, nil
+}
+
 // ResolvePath resolves an input path (absolute or relative) to an absolute path:
 //   - relative paths resolve against workBaseDir
 //   - enforces allowedRoots (if set)
@@ -45,6 +73,16 @@ func ResolvePath(workBaseDir string, allowedRoots []string, inputPath, defaultIf
 
 	// Resolve relative against base.
 	if !filepath.IsAbs(norm) {
+		// IMPORTANT: if workBaseDir is empty, do not silently resolve relative paths
+		// against whatever filepath.Abs uses (process CWD) without making it explicit.
+		// This also keeps behavior consistent with tool constructors that default baseDir to CWD.
+		if strings.TrimSpace(workBaseDir) == "" {
+			cwd, e := os.Getwd()
+			if e != nil {
+				return "", e
+			}
+			workBaseDir = cwd
+		}
 		norm = filepath.Join(workBaseDir, norm)
 	}
 

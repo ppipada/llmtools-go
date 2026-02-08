@@ -11,6 +11,7 @@ import (
 	_ "image/png"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -50,6 +51,19 @@ func ReadImage(
 	}
 	out.Path = p
 
+	// Refuse symlink traversal in parent directories (best-effort hardening).
+	// Preserve current semantics: if parent doesn't exist, treat as "file doesn't exist".
+	parent := filepath.Dir(p)
+	if parent != "" && parent != "." {
+		if err := VerifyDirNoSymlink(parent); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				out.Exists = false
+				return out, nil
+			}
+			return nil, err
+		}
+	}
+
 	st, err := os.Lstat(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -68,10 +82,7 @@ func ReadImage(
 	if (st.Mode() & os.ModeSymlink) != 0 {
 		return nil, fmt.Errorf("refusing to operate on symlink file: %s", p)
 	}
-	if !out.Exists {
-		// Not an error: just report non-existence.
-		return out, nil
-	}
+
 	if out.IsDir {
 		return nil, errors.New("path points to a directory, expected file")
 	}

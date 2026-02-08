@@ -56,27 +56,13 @@ func NewFSTool(opts ...FSToolOption) (*FSTool, error) {
 		}
 	}
 
-	// Canonicalize roots first.
-	roots, err := fileutil.CanonicalizeAllowedRoots(ft.allowedRoots)
+	eff, roots, err := fileutil.InitPathPolicy(ft.workBaseDir, ft.allowedRoots)
 	if err != nil {
 		return nil, err
 	}
-	ft.allowedRoots = roots
 
-	// Resolve base (default: cwd) and ensure it is allowed (if roots set).
-	base := strings.TrimSpace(ft.workBaseDir)
-	if base == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		base = cwd
-	}
-	eff, err := fileutil.GetEffectiveWorkDir(base, ft.allowedRoots)
-	if err != nil {
-		return nil, err
-	}
 	ft.workBaseDir = eff
+	ft.allowedRoots = roots
 
 	return ft, nil
 }
