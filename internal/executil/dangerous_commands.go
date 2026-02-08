@@ -1,4 +1,4 @@
-package shelltool
+package executil
 
 import (
 	"errors"
@@ -10,43 +10,7 @@ import (
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
-var hardBlockedCommands = func() map[string]struct{} {
-	// Non-overridable baseline. These are blocked regardless of AllowDangerous.
-	hard := []string{
-		// Privilege escalation / destructive.
-		"sudo", "su",
-		"rm",
-		"mkfs",
-		"shutdown", "reboot", "halt", "poweroff",
-
-		// Interactive/TUI editors (not useful in non-interactive tool).
-		"vim", "vi", "nano", "emacs", "less", "more", "top", "htop",
-
-		// Network/communication tools.
-		"curl", "wget",
-		"nc", "netcat", "ncat", "socat",
-		"ssh", "scp", "sftp",
-		"ftp", "tftp", "telnet",
-
-		// PowerShell network cmdlets/aliases (relevant when shell is pwsh/powershell).
-		"invoke-webrequest", "iwr",
-		"invoke-restmethod", "irm",
-
-		// Windows destructive / deletion equivalents (also harmless to block on unix).
-		"diskpart",
-		"format.com",
-		"del", "erase", "rmdir", "rd",
-		"remove-item", "ri",
-	}
-
-	m := make(map[string]struct{}, len(hard))
-	for _, c := range hard {
-		m[c] = struct{}{}
-	}
-	return m
-}()
-
-func rejectDangerousCommand(
+func RejectDangerousCommand(
 	cmd, shellPath string, shellName ShellName,
 	blockedCommands map[string]struct{},
 	enableHeuristicChecks bool,
@@ -114,28 +78,7 @@ func rejectDangerousCommand(
 	})
 }
 
-func isBlockedName(name string, blocked map[string]struct{}) bool {
-	if blocked == nil {
-		return false
-	}
-	// Exact match first.
-	if _, ok := blocked[name]; ok {
-		return true
-	}
-	// On Windows, also match by stripping a common executable extension.
-	if runtime.GOOS == toolutil.GOOSWindows {
-		ext := strings.ToLower(filepath.Ext(name))
-		switch ext {
-		case ".exe", ".com", ".bat", ".cmd":
-			if _, ok := blocked[strings.TrimSuffix(name, ext)]; ok {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func normalizeBlockedCommand(s string) (string, error) {
+func NormalizeBlockedCommand(s string) (string, error) {
 	x := strings.TrimSpace(s)
 	if x == "" {
 		return "", nil
@@ -281,6 +224,27 @@ func forEachSegment(s string, dialect shellDialect, fn func(seg string) error) e
 	}
 
 	return emit(len(s))
+}
+
+func isBlockedName(name string, blocked map[string]struct{}) bool {
+	if blocked == nil {
+		return false
+	}
+	// Exact match first.
+	if _, ok := blocked[name]; ok {
+		return true
+	}
+	// On Windows, also match by stripping a common executable extension.
+	if runtime.GOOS == toolutil.GOOSWindows {
+		ext := strings.ToLower(filepath.Ext(name))
+		switch ext {
+		case ".exe", ".com", ".bat", ".cmd":
+			if _, ok := blocked[strings.TrimSuffix(name, ext)]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func shellFields(s string, dialect shellDialect) []string {
@@ -475,14 +439,6 @@ func hasBackgroundAmpersand(s string) bool {
 	}
 	return false
 }
-
-type shellDialect int
-
-const (
-	dialectSh shellDialect = iota
-	dialectPowerShell
-	dialectCmd
-)
 
 func dialectForShell(shellName ShellName) shellDialect {
 	switch shellName {

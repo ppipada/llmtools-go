@@ -31,6 +31,27 @@ func NormalizeLineBlockInput(in []string) []string {
 	return out
 }
 
+// RequireSingleTrimmedBlockMatch finds trimmed-equal block matches and requires exactly one.
+func RequireSingleTrimmedBlockMatch(lines, block []string, name string) (int, error) {
+	return RequireSingleMatch(FindTrimmedBlockMatches(lines, block), name)
+}
+
+// RequireSingleMatch enforces that idxs contains exactly one match index.
+// This is useful for “anchor must be unique” tool semantics.
+func RequireSingleMatch(idxs []int, name string) (int, error) {
+	if len(idxs) == 0 {
+		return 0, fmt.Errorf("no match found for %s", name)
+	}
+	if len(idxs) > 1 {
+		return 0, fmt.Errorf(
+			"ambiguous match for %s: found %d occurrences; provide a more specific match",
+			name,
+			len(idxs),
+		)
+	}
+	return idxs[0], nil
+}
+
 // FindTrimmedBlockMatches returns all start indices i where `block` matches `lines`
 // when comparing strings.TrimSpace(line) line-by-line.
 //
@@ -118,27 +139,6 @@ func EnsureNonOverlappingFixedWidth(matchIdxs []int, width int) error {
 		}
 	}
 	return nil
-}
-
-// RequireSingleMatch enforces that idxs contains exactly one match index.
-// This is useful for “anchor must be unique” tool semantics.
-func RequireSingleMatch(idxs []int, name string) (int, error) {
-	if len(idxs) == 0 {
-		return 0, fmt.Errorf("no match found for %s", name)
-	}
-	if len(idxs) > 1 {
-		return 0, fmt.Errorf(
-			"ambiguous match for %s: found %d occurrences; provide a more specific match",
-			name,
-			len(idxs),
-		)
-	}
-	return idxs[0], nil
-}
-
-// RequireSingleTrimmedBlockMatch finds trimmed-equal block matches and requires exactly one.
-func RequireSingleTrimmedBlockMatch(lines, block []string, name string) (int, error) {
-	return RequireSingleMatch(FindTrimmedBlockMatches(lines, block), name)
 }
 
 func GetTrimmedLines(lines []string) []string {

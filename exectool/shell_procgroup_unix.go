@@ -1,6 +1,6 @@
 //go:build !windows
 
-package shelltool
+package exectool
 
 import (
 	"errors"

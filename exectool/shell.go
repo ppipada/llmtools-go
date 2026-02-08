@@ -1,4 +1,4 @@
-package shelltool
+package exectool
 
 import (
 	"bytes"
@@ -18,11 +18,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/shelltool/shell.ShellCommand"
+const shellCommandFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/shell.ShellCommand"
 
 // Fixed, package-wide hard limits (single source of truth).
 const (
@@ -90,19 +91,19 @@ var shellToolSpec = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-type ShellName string
+type ShellName = executil.ShellName
 
 const (
-	ShellNameAuto       ShellName = "auto"
-	ShellNameBash       ShellName = "bash"
-	ShellNameZsh        ShellName = "zsh"
-	ShellNameSh         ShellName = "sh"
-	ShellNameDash       ShellName = "dash"
-	ShellNameKsh        ShellName = "ksh"
-	ShellNameFish       ShellName = "fish"
-	ShellNamePwsh       ShellName = "pwsh"
-	ShellNamePowershell ShellName = "powershell"
-	ShellNameCmd        ShellName = "cmd"
+	ShellNameAuto       ShellName = executil.ShellNameAuto
+	ShellNameBash       ShellName = executil.ShellNameBash
+	ShellNameZsh        ShellName = executil.ShellNameZsh
+	ShellNameSh         ShellName = executil.ShellNameSh
+	ShellNameDash       ShellName = executil.ShellNameDash
+	ShellNameKsh        ShellName = executil.ShellNameKsh
+	ShellNameFish       ShellName = executil.ShellNameFish
+	ShellNamePwsh       ShellName = executil.ShellNamePwsh
+	ShellNamePowershell ShellName = executil.ShellNamePowershell
+	ShellNameCmd        ShellName = executil.ShellNameCmd
 )
 
 type selectedShell struct {
@@ -187,7 +188,7 @@ func WithShellCommandPolicy(p ShellCommandPolicy) ShellToolOption {
 func WithShellBlockedCommands(cmds []string) ShellToolOption {
 	return func(st *ShellTool) error {
 		for _, c := range cmds {
-			n, err := normalizeBlockedCommand(c)
+			n, err := executil.NormalizeBlockedCommand(c)
 			if err != nil {
 				return err
 			}
@@ -243,7 +244,7 @@ func NewShellTool(opts ...ShellToolOption) (*ShellTool, error) {
 	st := &ShellTool{
 		policy:              DefaultShellCommandPolicy,
 		allowedWorkdirRoots: nil,
-		blockedCommands:     maps.Clone(hardBlockedCommands),
+		blockedCommands:     maps.Clone(executil.HardBlockedCommands),
 		sessions:            newSessionStore(),
 	}
 	for _, opt := range opts {
@@ -421,7 +422,13 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *Shell
 		}
 
 		// Always enforce command blocklist. Heuristic checks are optional.
-		if err := rejectDangerousCommand(command, sel.Path, sel.Name, blocked, !policy.AllowDangerous); err != nil {
+		if err := executil.RejectDangerousCommand(
+			command,
+			sel.Path,
+			sel.Name,
+			blocked,
+			!policy.AllowDangerous,
+		); err != nil {
 			return nil, err
 		}
 

@@ -1,4 +1,4 @@
-package shelltool
+package exectool
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -107,7 +108,7 @@ func TestNormalizeBlockedCommand(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := normalizeBlockedCommand(tc.in)
+			got, err := executil.NormalizeBlockedCommand(tc.in)
 			if tc.wantErrSub != "" {
 				if err == nil {
 					t.Fatalf("expected error")

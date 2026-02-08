@@ -1,4 +1,4 @@
-package shelltool
+package executil
 
 import (
 	"reflect"
@@ -291,7 +291,7 @@ func TestRejectDangerous_PowerShell_CallOperatorAndComments(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := rejectDangerousCommand(tc.cmd, "pwsh", ShellNamePwsh, hardBlockedCommands, true)
+			err := RejectDangerousCommand(tc.cmd, "pwsh", ShellNamePwsh, HardBlockedCommands, true)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error")
 			}
@@ -357,7 +357,7 @@ func TestRejectDangerous_HeuristicChecksToggle(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := rejectDangerousCommand(tc.cmd, "/bin/sh", tc.shell, hardBlockedCommands, tc.enable)
+			err := RejectDangerousCommand(tc.cmd, "/bin/sh", tc.shell, HardBlockedCommands, tc.enable)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected error")
 			}
@@ -392,7 +392,7 @@ func runRejectCases(t *testing.T, cases []rejectTC) {
 				}
 			}
 
-			err := rejectDangerousCommand(tc.cmd, tc.shellPath, ShellName(tc.shellName), hardBlockedCommands, true)
+			err := RejectDangerousCommand(tc.cmd, tc.shellPath, ShellName(tc.shellName), HardBlockedCommands, true)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected reject for %q", tc.cmd)

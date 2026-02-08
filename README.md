@@ -29,7 +29,7 @@ LLM Tool implementations for Golang
   - Images (`imagetool`):
     - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents.
 
-  - Commands (`shelltool`):
+  - Execute Commands (`exectool`):
     - Execute Shell commands (`shell`): Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env. (Check notes below too).
 
   - Text Processing (`texttool`):
@@ -50,7 +50,7 @@ LLM Tool implementations for Golang
 - `spec`: Tool manifests + IO/output schema
 - `fstool`: Filesystem tools.
 - `imagetool`: Image tools.
-- `shelltool`: Shell tools.
+- `exectool`: Execute commands.
 - `texttool`: Text tools.
 
 ## Installation
@@ -136,7 +136,7 @@ func main() {
     ensure it is >= the tool timeout or set it to 0 to avoid early cancellation.
 
 - Policy knobs:
-  - Hosts can pass a policy into tool instantiation. The default policy is at: `shelltool.DefaultShellCommandPolicy`.
+  - Hosts can pass a policy into tool instantiation. The default policy is at: `exectool.DefaultShellCommandPolicy`.
 
 ## Development
 

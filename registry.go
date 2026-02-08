@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexigpt/llmtools-go/exectool"
 	"github.com/flexigpt/llmtools-go/fstool"
 	"github.com/flexigpt/llmtools-go/imagetool"
 	"github.com/flexigpt/llmtools-go/internal/jsonutil"
 	"github.com/flexigpt/llmtools-go/internal/logutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
-	"github.com/flexigpt/llmtools-go/shelltool"
 	"github.com/flexigpt/llmtools-go/spec"
 	"github.com/flexigpt/llmtools-go/texttool"
 )
@@ -113,7 +113,7 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 
-	sh, err := shelltool.NewShellTool(
+	sh, err := exectool.NewShellTool(
 	// Defaults are fine for builtins; hosts should instantiate their own tool with custom policy/sessions/env/workdir
 	// settings as needed.
 	)

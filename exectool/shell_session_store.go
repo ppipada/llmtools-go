@@ -1,4 +1,4 @@
-package shelltool
+package exectool
 
 import (
 	"container/list"
