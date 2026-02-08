@@ -24,7 +24,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 
 	cases := []struct {
 		name          string
-		opts          []ShellToolOption
+		opts          []ExecToolOption
 		args          ShellCommandArgs
 		needsShell    bool
 		wantErrSubstr string
@@ -58,7 +58,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		},
 		{
 			name: "workdir_outside_allowed_roots",
-			opts: []ShellToolOption{WithShellAllowedWorkdirRoots([]string{td})},
+			opts: []ExecToolOption{WithAllowedRoots([]string{td}), WithWorkBaseDir(td)},
 			args: ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: outside},
 
 			wantErrSubstr: "outside allowed roots",
@@ -73,7 +73,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 				requireAnyShell(t)
 			}
 
-			_, err := st.Run(t.Context(), tc.args)
+			_, err := st.ShellCommand(t.Context(), tc.args)
 			if err == nil {
 				t.Fatalf("expected error")
 			}
@@ -142,7 +142,7 @@ func TestNormalizedCommandList(t *testing.T) {
 }
 
 func TestPolicy_EffectiveTimeout_UsesDefaultAndClampsToHardMax(t *testing.T) {
-	p := ShellCommandPolicy{}
+	p := ExecutionPolicy{}
 	if got := effectiveTimeout(p); got != executil.DefaultTimeout {
 		t.Fatalf("expected DefaultTimeout=%v got %v", executil.DefaultTimeout, got)
 	}
@@ -154,7 +154,7 @@ func TestPolicy_EffectiveTimeout_UsesDefaultAndClampsToHardMax(t *testing.T) {
 }
 
 func TestPolicy_EffectiveMaxOutputBytes_UsesDefaultAndClamps(t *testing.T) {
-	p := ShellCommandPolicy{}
+	p := ExecutionPolicy{}
 	if got := effectiveMaxOutputBytes(p); got != executil.DefaultMaxOutputBytes {
 		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", executil.DefaultMaxOutputBytes, got)
 	}
@@ -213,7 +213,7 @@ func TestShellCommand_Run_CapturesStdoutStderr_ExitCode(t *testing.T) {
 	}
 	st := newTestShellTool(t)
 
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`printf '%s' hello; printf '%s' err_msg 1>&2`},
 	})
@@ -246,7 +246,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	st := newTestShellTool(t)
 
 	// Exit with explicit code.
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`exit 7`},
 	})
@@ -259,7 +259,7 @@ func TestShellCommand_ExitCode_NonZeroAndSignaled(t *testing.T) {
 	}
 
 	// Signal self with SIGKILL; expect 128+9=137 per unix convention in exitCodeFromProcessState.
-	out, err = st.Run(t.Context(), ShellCommandArgs{
+	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`kill -9 $$`},
 	})
@@ -276,11 +276,11 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sleep/timeout expectations")
 	}
-	p := DefaultShellCommandPolicy
+	p := DefaultExecutionPolicy
 	p.Timeout = 150 * time.Millisecond
-	st := newTestShellTool(t, WithShellCommandPolicy(p))
+	st := newTestShellTool(t, WithExecutionPolicy(p))
 
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:     ShellNameSh,
 		Commands:  []string{`sleep 2`},
 		SessionID: "",
@@ -307,11 +307,11 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sh loop expectations")
 	}
-	p := DefaultShellCommandPolicy
+	p := DefaultExecutionPolicy
 	p.MaxOutputBytes = 1024
-	st := newTestShellTool(t, WithShellCommandPolicy(p))
+	st := newTestShellTool(t, WithExecutionPolicy(p))
 
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
 
 		Commands: []string{
@@ -339,7 +339,7 @@ func TestShellCommand_ExecuteParallelly_False_StopsOnFirstError(t *testing.T) {
 	}
 	st := newTestShellTool(t)
 
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
 		Commands: []string{
 			`exit 7`,
@@ -365,7 +365,7 @@ func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testi
 	}
 	st := newTestShellTool(t)
 
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell: ShellNameSh,
 		Commands: []string{
 			`exit 7`,
@@ -390,7 +390,7 @@ func TestShellCommand_ExecuteParallelly_True_RunsAllCommandsEvenIfError(t *testi
 
 func TestShellCommand_RejectsNULInCommand(t *testing.T) {
 	st := newTestShellTool(t)
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{"echo hi\x00there"},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "nul") {
@@ -404,7 +404,7 @@ func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
 	}
 	st := newTestShellTool(t)
 
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{`rm -rf /`},
 	})
@@ -417,10 +417,10 @@ func TestShellCommand_DangerousRejected_BeforeExec(t *testing.T) {
 }
 
 func TestShellCommand_MaxCommands_PolicyLimit(t *testing.T) {
-	st := newTestShellTool(t, WithShellCommandPolicy(ShellCommandPolicy{
+	st := newTestShellTool(t, WithExecutionPolicy(ExecutionPolicy{
 		MaxCommands: 1,
 	}))
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{"echo a", "echo b"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "too many commands") {
@@ -429,10 +429,10 @@ func TestShellCommand_MaxCommands_PolicyLimit(t *testing.T) {
 }
 
 func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
-	st := newTestShellTool(t, WithShellCommandPolicy(ShellCommandPolicy{
+	st := newTestShellTool(t, WithExecutionPolicy(ExecutionPolicy{
 		MaxCommandLength: 5,
 	}))
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{"echo_12345"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "command too long") {
@@ -441,20 +441,20 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 }
 
 func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
-	st := newTestShellTool(t, WithShellMaxSessions(1))
+	st := newTestShellTool(t, WithMaxSessions(1))
 
-	out1, err := st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo a"}})
+	out1, err := st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{"echo a"}})
 	if err != nil {
 		t.Fatalf("Run1 error: %v", err)
 	}
 	sid1 := out1.SessionID
 
-	_, err = st.Run(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
+	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{Commands: []string{"echo b"}})
 	if err != nil {
 		t.Fatalf("Run2 error: %v", err)
 	}
 
-	_, err = st.Run(t.Context(), ShellCommandArgs{
+	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid1,
 		Commands:  []string{"echo should_fail"},
 	})
@@ -472,7 +472,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	td := t.TempDir()
 
 	// 1) Create session, set workdir and env, and run "pwd".
-	out, err := st.Run(t.Context(), ShellCommandArgs{
+	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Workdir:  td,
 		Env:      map[string]string{"FOO": "bar"},
@@ -496,7 +496,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	sid := resp.SessionID
 
 	// 2) Verify env persists without passing Env.
-	out, err = st.Run(t.Context(), ShellCommandArgs{
+	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Commands:  []string{`printf '%s' "$FOO"`},
@@ -511,7 +511,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	mustSameDir(t, td, resp.Workdir)
 
 	// 3) Update session env by providing Env; should persist for subsequent calls.
-	out, err = st.Run(t.Context(), ShellCommandArgs{
+	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Env:       map[string]string{"FOO": "baz"},
@@ -525,7 +525,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("expected FOO=baz, got %q", resp.Results[0].Stdout)
 	}
 
-	out, err = st.Run(t.Context(), ShellCommandArgs{
+	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		SessionID: sid,
 		Shell:     ShellNameSh,
 		Commands:  []string{`printf '%s' "$FOO"`},
@@ -543,7 +543,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	out, err = st.Run(t.Context(), ShellCommandArgs{
+	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
 		Commands: []string{"pwd; printf '%s' \"$FOO\""},
 	})
@@ -566,7 +566,7 @@ func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := st.Run(ctx, ShellCommandArgs{
+	_, err := st.ShellCommand(ctx, ShellCommandArgs{
 		Commands: []string{"echo hi"},
 	})
 	if err == nil {
@@ -580,14 +580,14 @@ func TestShellCommand_ContextCanceledEarly(t *testing.T) {
 func TestShellCommand_Blocklist_DefaultBlocksRMAndCurl(t *testing.T) {
 	st := newTestShellTool(t)
 
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{`rm foo`},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
 		t.Fatalf("expected rm to be blocked, got %v", err)
 	}
 
-	_, err = st.Run(t.Context(), ShellCommandArgs{
+	_, err = st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{`curl https://example.com`},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
@@ -596,11 +596,11 @@ func TestShellCommand_Blocklist_DefaultBlocksRMAndCurl(t *testing.T) {
 }
 
 func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
-	p := DefaultShellCommandPolicy
+	p := DefaultExecutionPolicy
 	p.AllowDangerous = true
-	st := newTestShellTool(t, WithShellCommandPolicy(p))
+	st := newTestShellTool(t, WithExecutionPolicy(p))
 
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{`rm foo`},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
@@ -609,9 +609,9 @@ func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
 }
 
 func TestShellCommand_Blocklist_AdditionalBlocks(t *testing.T) {
-	st := newTestShellTool(t, WithShellBlockedCommands([]string{"echo"}))
+	st := newTestShellTool(t, WithBlockedCommands([]string{"echo"}))
 
-	_, err := st.Run(t.Context(), ShellCommandArgs{
+	_, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Commands: []string{`echo hi`},
 	})
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "blocked") {
@@ -619,12 +619,12 @@ func TestShellCommand_Blocklist_AdditionalBlocks(t *testing.T) {
 	}
 }
 
-func newTestShellTool(t *testing.T, opts ...ShellToolOption) *ShellTool {
+func newTestShellTool(t *testing.T, opts ...ExecToolOption) *ExecTool {
 	t.Helper()
 
-	st, err := NewShellTool(opts...)
+	st, err := NewExecTool(opts...)
 	if err != nil {
-		t.Fatalf("NewShellTool: %v", err)
+		t.Fatalf("NewExecTool: %v", err)
 	}
 	return st
 }

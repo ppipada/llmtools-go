@@ -123,14 +123,17 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 
-	sh, err := exectool.NewShellTool(
+	et, err := exectool.NewExecTool(
 	// Defaults are fine for builtins; hosts should instantiate their own tool with custom policy/sessions/env/workdir
 	// settings as needed.
 	)
 	if err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, sh.Tool(), sh.Run); err != nil {
+	if err := RegisterTypedAsTextTool(r, et.ShellCommandTool(), et.ShellCommand); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, et.RunScriptTool(), et.RunScript); err != nil {
 		return err
 	}
 

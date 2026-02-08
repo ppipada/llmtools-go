@@ -141,7 +141,10 @@ func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string
 	return out, nil
 }
 
-func (sess *ShellSession) GetEffectiveWorkdir(inputWorkDir string, allowedRoots []string) (string, error) {
+func (sess *ShellSession) GetEffectiveWorkdir(
+	inputWorkDir, defaultWorkDir string,
+	allowedRoots []string,
+) (string, error) {
 	if sess == nil {
 		return "", errors.New("invalid session")
 	}
@@ -158,6 +161,8 @@ func (sess *ShellSession) GetEffectiveWorkdir(inputWorkDir string, allowedRoots 
 		checkWorkDir = inputWorkDir
 	} else if strings.TrimSpace(wd) != "" {
 		checkWorkDir = wd
+	} else if strings.TrimSpace(defaultWorkDir) != "" {
+		checkWorkDir = defaultWorkDir
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
