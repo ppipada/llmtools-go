@@ -215,7 +215,7 @@ func TestReadImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := ReadImage(tt.ctx, tt.args)
+			out, err := readImage(tt.ctx, tt.args, "", nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)
@@ -232,22 +232,6 @@ func TestReadImage(t *testing.T) {
 				tt.check(t, out)
 			}
 		})
-	}
-}
-
-func TestReadImageTool_CloneIndependence(t *testing.T) {
-	tool1 := ReadImageTool()
-	if len(tool1.Tags) == 0 {
-		t.Fatalf("expected at least one tag to test clone behavior")
-	}
-	tool1.Tags[0] = "mutated"
-
-	tool2 := ReadImageTool()
-	if len(tool2.Tags) == 0 {
-		t.Fatalf("expected at least one tag on fresh tool")
-	}
-	if tool2.Tags[0] == "mutated" {
-		t.Fatalf("tool clone appears to share underlying Tags slice; expected deep clone")
 	}
 }
 

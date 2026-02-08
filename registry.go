@@ -114,7 +114,12 @@ func RegisterBuiltins(r *Registry) error {
 		return err
 	}
 
-	if err := RegisterTypedAsTextTool(r, imagetool.ReadImageTool(), imagetool.ReadImage); err != nil {
+	it, err := imagetool.NewImageTool()
+	if err != nil {
+		return err
+	}
+
+	if err := RegisterTypedAsTextTool(r, it.ReadImageTool(), it.ReadImage); err != nil {
 		return err
 	}
 

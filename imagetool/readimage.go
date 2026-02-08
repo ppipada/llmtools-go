@@ -43,10 +43,6 @@ var readImageTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ReadImageTool() spec.Tool {
-	return toolutil.CloneTool(readImageTool)
-}
-
 type ReadImageArgs struct {
 	Path              string `json:"path"`
 	IncludeBase64Data bool   `json:"includeBase64Data"`
@@ -68,24 +64,28 @@ type ReadImageOut struct {
 	Base64Data string `json:"base64Data,omitempty"`
 }
 
-// ReadImage reads intrinsic metadata for a local image file, optionally including base64-encoded contents.
+// readImage reads intrinsic metadata for a local image file, optionally including base64-encoded contents.
 // Semantics:
 //   - empty path => error
 //   - directory path => error
 //   - non-image/unsupported image => error
 //   - non-existent path => (Exists=false, err=nil).
-func ReadImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
-	return toolutil.WithRecoveryResp(func() (*ReadImageOut, error) {
-		return readImage(ctx, args)
-	})
-}
-
-func readImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
+func readImage(
+	ctx context.Context,
+	args ReadImageArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*ReadImageOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	info, err := fileutil.ReadImage(args.Path, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
+	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := fileutil.ReadImage(p, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}
