@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -22,7 +20,7 @@ var runScriptToolSpec = spec.Tool{
 	Slug:          "runscript",
 	Version:       "v1.0.0",
 	DisplayName:   "Run Script",
-	Description:   "Run a pre-existing script from disk (hardened). Intended for vetted scripts under scripts/.",
+	Description:   "Run a pre-existing script from disk.",
 	Tags:          []string{"exec", "script"},
 
 	ArgSchema: spec.JSONSchema(`{
@@ -31,7 +29,7 @@ var runScriptToolSpec = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Relative path to the script."
+		"description": "Path to the script. Can be absolute or relative. Relative paths try to resolve against input workdir if provided, else resolves against the tool workBaseDir."
 	},
 	"args": {
 		"type": "array",
@@ -45,7 +43,7 @@ var runScriptToolSpec = spec.Tool{
 	},
 	"workdir": {
 		"type": "string",
-		"description": "Relative working directory. Default is workBaseDir."
+		"description": "Working directory. Can be absolute or relative to workBaseDir."
 	}
 },
 "required": ["path"],
@@ -80,7 +78,12 @@ type RunScriptPolicy struct {
 	// RequireUnderDir, if non-empty, requires args.Path to be under this relative directory (default: "scripts").
 	RequireUnderDir string
 
+	// On Windows, a ".sh" script may still work if "sh" exists (e.g. Git Bash), but extension mapping above is
+	// conservative.
+	// If needed, host apps can expand RunScriptPolicy.AllowedExtensions and add more interpreter mappings later.
+
 	// AllowedExtensions is a lowercase allowlist (e.g. [".sh", ".ps1"]).
+	// If empty/nil, extension is not restricted (but interpreter inference may still fail).
 	AllowedExtensions []string
 
 	// ExecutionPolicy overrides the ExecTool-wide defaults for runscript.
@@ -93,8 +96,7 @@ type RunScriptPolicy struct {
 }
 
 var DefaultRunScriptPolicy = RunScriptPolicy{
-	RequireUnderDir:   "scripts",
-	AllowedExtensions: []string{".sh", ".ps1"},
+	AllowedExtensions: []string{".sh", ".bash", ".zsh", ".ksh", ".dash", ".ps1"},
 	ExecutionPolicy:   ExecutionPolicy{}, // inherit from ExecTool by default
 	MaxArgs:           256,
 	MaxArgBytes:       16 * 1024,
@@ -113,34 +115,14 @@ func runScript(
 		return nil, err
 	}
 
-	// Validate script path (must be relative).
-	rel := strings.TrimSpace(args.Path)
-	if rel == "" {
+	reqPath := strings.TrimSpace(args.Path)
+	if reqPath == "" {
 		return nil, errors.New("path is required")
 	}
-	normRel, err := fileutil.NormalizePath(rel)
-	if err != nil {
-		return nil, err
-	}
-	if filepath.IsAbs(normRel) {
-		return nil, errors.New("path must be relative")
-	}
-	if runtime.GOOS == toolutil.GOOSWindows {
-		// Reject drive-relative "C:foo" style paths.
-		if vol := filepath.VolumeName(normRel); vol != "" {
-			return nil, errors.New("path must be relative (no drive letter)")
-		}
-	}
-
-	// Enforce under scripts/ (or configured dir) by relative semantics.
-	reqDir := strings.TrimSpace(pol.RequireUnderDir)
-	if reqDir != "" && !relIsUnderDir(normRel, reqDir) {
-		return nil, fmt.Errorf("script path must be under %s/: %q", reqDir, normRel)
-	}
-
-	// Force script resolution under workBaseDir regardless of allowedRoots being empty:
-	// we intentionally restrict scripts to the current workspace root.
-	scriptAbs, err := fileutil.ResolvePath(workBaseDir, []string{workBaseDir}, normRel, "")
+	// Resolve script path:
+	// - relative => workBaseDir
+	// - absolute => must still be within allowedRoots (if configured).
+	scriptAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, reqPath, "")
 	if err != nil {
 		return nil, err
 	}
@@ -151,16 +133,12 @@ func runScript(
 	}
 
 	ext := strings.ToLower(filepath.Ext(scriptAbs))
-	if !extAllowed(ext, pol.AllowedExtensions) {
+	if len(pol.AllowedExtensions) != 0 && !extAllowed(ext, pol.AllowedExtensions) {
 		return nil, fmt.Errorf("script extension %q is not allowed", ext)
 	}
 
-	// Workdir: relative (default ".") under workBaseDir.
-	wd := strings.TrimSpace(args.Workdir)
-	if wd == "" || wd == "." {
-		wd = "."
-	}
-	workdirAbs, err := fileutil.ResolvePath(workBaseDir, []string{workBaseDir}, wd, ".")
+	// Workdir: absolute or relative; default to workBaseDir.
+	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Workdir, workBaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +196,7 @@ func runScript(
 	maxOut := effectiveMaxOutputBytes(execPol)
 
 	// Merge env like shellcommand does (process env + overrides), but no session.
-	env, err := (&executil.ShellSession{}).GetEffectiveEnv(args.Env)
+	env, err := executil.EffectiveEnv(args.Env)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +215,14 @@ func runScript(
 	res, runErr := executil.RunOneShellCommand(ctx, sel, cmdStr, workdirAbs, env, timeout, maxOut)
 	if runErr != nil {
 		return &RunScriptResult{ //nolint:nilerr // For shell exec, we return a exit code on err.
-			Path:     normRel,
+			Path:     scriptAbs,
 			ExitCode: 127,
 			Stderr:   runErr.Error(),
 		}, nil
 	}
 
 	return &RunScriptResult{
-		Path:       normRel,
+		Path:       scriptAbs,
 		ExitCode:   res.ExitCode,
 		Stdout:     res.Stdout,
 		Stderr:     res.Stderr,
@@ -254,19 +232,6 @@ func runScript(
 		StdoutTruncated: res.StdoutTruncated,
 		StderrTruncated: res.StderrTruncated,
 	}, nil
-}
-
-func relIsUnderDir(relPath, dir string) bool {
-	r := filepath.Clean(relPath)
-	d := filepath.Clean(dir)
-	if r == "." || r == string(filepath.Separator) || r == "" {
-		return false
-	}
-	if r == d {
-		return true
-	}
-	prefix := d + string(filepath.Separator)
-	return strings.HasPrefix(r, prefix)
 }
 
 func extAllowed(ext string, allowed []string) bool {
@@ -288,9 +253,9 @@ func extAllowed(ext string, allowed []string) bool {
 func shellForScriptExt(ext string) (ShellName, error) {
 	switch strings.ToLower(ext) {
 	case ".ps1":
-		// Prefer pwsh where available; selectShell will fall back if requested explicitly as powershell.
-		return ShellNamePwsh, nil
-	case ".sh":
+		// Request "powershell" so resolveShell prefers pwsh but can fall back to Windows PowerShell.
+		return ShellNamePowershell, nil
+	case ".sh", ".bash", ".zsh", ".ksh", ".dash":
 		return ShellNameSh, nil
 	default:
 		return "", fmt.Errorf("no shell mapping for script extension %q", ext)
@@ -306,6 +271,7 @@ func buildScriptCommand(sel executil.SelectedShell, scriptAbs string, scriptArgs
 	default:
 		// In sh-like shells, invoke the selected shell binary as the interpreter.
 		// This avoids requiring the script file to have executable bits.
+		// (Yes, this spawns an extra shell layer; it's deliberate for consistent behavior.)
 		argv := append([]string{sel.Path, scriptAbs}, scriptArgs...)
 		return executil.CommandFromArgv(sel.Name, argv)
 	}

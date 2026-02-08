@@ -58,7 +58,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		},
 		{
 			name: "workdir_outside_allowed_roots",
-			opts: []ExecToolOption{WithAllowedRoots([]string{td}), WithWorkBaseDir(td)},
+			opts: []ExecToolOption{WithAllowedRoots([]string{td})},
 			args: ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: outside},
 
 			wantErrSubstr: "outside allowed roots",

@@ -28,8 +28,9 @@ type ExecTool struct {
 	mu sync.RWMutex
 
 	allowedRoots []string
-	// Note that if allowedroots are provided, make sure to pass a workbasedir that is inside one of the allowed dirs.
-	// The default fallback for workbasedir is process working dir, which may or may not be in your allowed dir.
+	// "workBaseDir" is the base for resolving relative paths and the default working directory.
+	// If allowedRoots is set and workBaseDir is empty, InitPathPolicy will default workBaseDir to the first allowed
+	// root.
 	workBaseDir     string
 	blockedCommands map[string]struct{} // includes executil.HardBlockedCommands
 

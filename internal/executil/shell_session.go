@@ -18,12 +18,20 @@ type envEntry struct {
 	key string
 	val string
 }
+
 type ShellSession struct {
 	id      string
 	workdir string
 	env     map[string]string
 	mu      sync.RWMutex
 	closed  bool
+}
+
+// EffectiveEnv returns the current process environment merged with overrides.
+// It is equivalent to session-less ShellSession.GetEffectiveEnv.
+func EffectiveEnv(overrides map[string]string) ([]string, error) {
+	// Nil receiver is safe: ShellSession.GetEffectiveEnv checks sess != nil before reading session state.
+	return (*ShellSession)(nil).GetEffectiveEnv(overrides)
 }
 
 func (sess *ShellSession) GetID() string {

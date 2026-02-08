@@ -24,7 +24,9 @@ var errWindowsDriveRelativePath = errors.New(
 //
 // Behavior:
 //   - allowedRoots == nil/empty => allow all (canonRoots will be nil/empty)
-//   - workBaseDir blank => defaults to current process working directory
+//   - workBaseDir blank:
+//   - if allowedRoots is set => defaults to the first allowed root (more deterministic/sandbox-friendly)
+//   - else => defaults to current process working directory
 //   - returned effectiveBase is canonicalized and guaranteed to exist and (if roots set) be within roots
 func InitPathPolicy(workBaseDir string, allowedRoots []string) (effectiveBase string, canonRoots []string, err error) {
 	canonRoots, err = CanonicalizeAllowedRoots(allowedRoots)
@@ -34,11 +36,17 @@ func InitPathPolicy(workBaseDir string, allowedRoots []string) (effectiveBase st
 
 	base := strings.TrimSpace(workBaseDir)
 	if base == "" {
-		cwd, e := os.Getwd()
-		if e != nil {
-			return "", nil, e
+		if len(canonRoots) > 0 {
+			// If a sandbox is configured, default base to the sandbox root.
+			// This avoids surprising "cwd outside allowed roots" failures and is deterministic.
+			base = canonRoots[0]
+		} else {
+			cwd, e := os.Getwd()
+			if e != nil {
+				return "", nil, e
+			}
+			base = cwd
 		}
-		base = cwd
 	}
 
 	effectiveBase, err = GetEffectiveWorkDir(base, canonRoots)
