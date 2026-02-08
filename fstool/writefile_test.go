@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
@@ -29,19 +28,9 @@ func TestWriteFile(t *testing.T) {
 				tmp := t.TempDir()
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
-				_, err := WriteFile(ctx, WriteFileArgs{Path: filepath.Join(tmp, "a.txt"), Content: "x"})
+				_, err := writeFile(ctx, WriteFileArgs{Path: filepath.Join(tmp, "a.txt"), Content: "x"}, "", nil)
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)
-				}
-			},
-		},
-		{
-			name: "rejects_relative_path",
-			run: func(t *testing.T) {
-				t.Helper()
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: "relative.txt", Content: "hello"})
-				if err == nil || !strings.Contains(strings.ToLower(err.Error()), "absolute") {
-					t.Fatalf("expected absolute path error, got: %v", err)
 				}
 			},
 		},
@@ -51,9 +40,9 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "text.txt")
-				out, err := WriteFile(t.Context(), WriteFileArgs{Path: "  " + p + "  ", Content: "hello"})
+				out, err := writeFile(t.Context(), WriteFileArgs{Path: "  " + p + "  ", Content: "hello"}, "", nil)
 				if err != nil {
-					t.Fatalf("WriteFile: %v", err)
+					t.Fatalf("writeFile: %v", err)
 				}
 				if out.Path != p || out.BytesWritten != 5 {
 					t.Fatalf("unexpected out: %+v", out)
@@ -83,10 +72,10 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "exists.txt")
-				if _, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}); err != nil {
+				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, "", nil); err != nil {
 					t.Fatalf("seed write: %v", err)
 				}
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "b", Overwrite: false})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "b", Overwrite: false}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -105,10 +94,10 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "ow.txt")
-				if _, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}); err != nil {
+				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, "", nil); err != nil {
 					t.Fatalf("seed write: %v", err)
 				}
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "bb", Overwrite: true})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "bb", Overwrite: true}, "", nil)
 				if err != nil {
 					t.Fatalf("overwrite: %v", err)
 				}
@@ -126,13 +115,13 @@ func TestWriteFile(t *testing.T) {
 				p := filepath.Join(tmp, "bin.dat")
 				raw := []byte{0x00, 0x01, 0x02, 0xff}
 				b64 := base64.StdEncoding.EncodeToString(raw)
-				out, err := WriteFile(t.Context(), WriteFileArgs{
+				out, err := writeFile(t.Context(), WriteFileArgs{
 					Path:     p,
 					Encoding: "  BiNaRy ",
 					Content:  "  " + b64 + "  ",
-				})
+				}, "", nil)
 				if err != nil {
-					t.Fatalf("WriteFile: %v", err)
+					t.Fatalf("writeFile: %v", err)
 				}
 				if out.BytesWritten != int64(len(raw)) {
 					t.Fatalf("unexpected out: %+v", out)
@@ -149,7 +138,7 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "badb64.dat")
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Encoding: "binary", Content: "!!!"})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Encoding: "binary", Content: "!!!"}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -161,7 +150,7 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "nope", "a.txt")
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -173,9 +162,9 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "a", "b", "c", "d.txt")
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "ok", CreateParents: true})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "ok", CreateParents: true}, "", nil)
 				if err != nil {
-					t.Fatalf("WriteFile: %v", err)
+					t.Fatalf("writeFile: %v", err)
 				}
 				if _, err := os.Stat(p); err != nil {
 					t.Fatalf("expected file to exist, stat err=%v", err)
@@ -188,7 +177,7 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "1", "2", "3", "4", "5", "6", "7", "8", "9", "f.txt")
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: true})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: true}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -202,7 +191,7 @@ func TestWriteFile(t *testing.T) {
 			run: func(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: tmp, Content: "x"})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: tmp, Content: "x"}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -215,7 +204,7 @@ func TestWriteFile(t *testing.T) {
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "badutf8.txt")
 				s := string([]byte{0xff, 0xfe})
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Encoding: "text", Content: s})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Encoding: "text", Content: s}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -235,7 +224,7 @@ func TestWriteFile(t *testing.T) {
 					t.Skipf("symlink not supported: %v", err)
 				}
 				p := filepath.Join(linkDir, "child.txt")
-				_, err := WriteFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false})
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}

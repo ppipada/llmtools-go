@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -26,7 +25,7 @@ var statPathTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute or relative path to inspect."
+		"description": "Path to inspect."
 	}
 },
 "required": ["path"],
@@ -36,10 +35,6 @@ var statPathTool = spec.Tool{
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
-}
-
-func StatPathTool() spec.Tool {
-	return toolutil.CloneTool(statPathTool)
 }
 
 type StatPathArgs struct {
@@ -55,18 +50,17 @@ type StatPathOut struct {
 	ModTime   *time.Time `json:"modTime,omitempty"`
 }
 
-// StatPath returns basic metadata for the supplied path without mutating the file system.
-func StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
-	return toolutil.WithRecoveryResp(func() (*StatPathOut, error) {
-		return statPath(ctx, args)
-	})
-}
-
-func statPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
+// statPath returns basic metadata for the supplied path without mutating the file system.
+func statPath(ctx context.Context, args StatPathArgs, workBaseDir string, allowedRoots []string) (*StatPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	pathInfo, err := fileutil.StatPath(args.Path)
+	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	if err != nil {
+		return nil, err
+	}
+
+	pathInfo, err := fileutil.StatPath(p)
 	if err != nil {
 		return nil, err
 	}

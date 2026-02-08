@@ -26,7 +26,7 @@ var readImageTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute or relative path of the image to read."
+		"description": "Path of the image to read."
 	},
 	"includeBase64Data": {
 		"type": "boolean",

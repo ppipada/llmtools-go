@@ -81,7 +81,7 @@ func TestStatPath(t *testing.T) {
 			if tt.ctx != nil {
 				ctx = tt.ctx(t)
 			}
-			res, err := StatPath(ctx, tt.args)
+			res, err := statPath(ctx, tt.args, "", nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)
 			}

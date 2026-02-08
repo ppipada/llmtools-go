@@ -84,28 +84,33 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 
 // RegisterBuiltins registers the built-in tools into r.
 func RegisterBuiltins(r *Registry) error {
-	if err := RegisterOutputsTool(r, fstool.ReadFileTool(), fstool.ReadFile); err != nil {
+	ft, err := fstool.NewFSTool()
+	if err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.SearchFilesTool(), fstool.SearchFiles); err != nil {
+
+	if err := RegisterOutputsTool(r, ft.ReadFileTool(), ft.ReadFile); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.WriteFileTool(), fstool.WriteFile); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.SearchFilesTool(), ft.SearchFiles); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.DeleteFileTool(), fstool.DeleteFile); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.WriteFileTool(), ft.WriteFile); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.ListDirectoryTool(), fstool.ListDirectory); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.DeleteFileTool(), ft.DeleteFile); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.StatPathTool(), fstool.StatPath); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.ListDirectoryTool(), ft.ListDirectory); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.MIMEForPathTool(), fstool.MIMEForPath); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.StatPathTool(), ft.StatPath); err != nil {
 		return err
 	}
-	if err := RegisterTypedAsTextTool(r, fstool.MIMEForExtensionTool(), fstool.MIMEForExtension); err != nil {
+	if err := RegisterTypedAsTextTool(r, ft.MIMEForPathTool(), ft.MIMEForPath); err != nil {
+		return err
+	}
+	if err := RegisterTypedAsTextTool(r, ft.MIMEForExtensionTool(), ft.MIMEForExtension); err != nil {
 		return err
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -42,10 +41,6 @@ var listDirectoryTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ListDirectoryTool() spec.Tool {
-	return toolutil.CloneTool(listDirectoryTool)
-}
-
 type ListDirectoryArgs struct {
 	Path    string `json:"path,omitempty"`    // default "."
 	Pattern string `json:"pattern,omitempty"` // Optional glob
@@ -54,19 +49,27 @@ type ListDirectoryOut struct {
 	Entries []string `json:"entries"`
 }
 
-// ListDirectory lists files / dirs in Path. If Pattern is supplied, the
+// listDirectory lists files / dirs in Path. If Pattern is supplied, the
 // results are filtered via filepath.Match.
-func ListDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
-	return toolutil.WithRecoveryResp(func() (*ListDirectoryOut, error) {
-		return listDirectory(ctx, args)
-	})
-}
-
-func listDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
+func listDirectory(
+	ctx context.Context,
+	args ListDirectoryArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*ListDirectoryOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entries, err := fileutil.ListDirectory(args.Path, args.Pattern)
+	dir, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, ".")
+	if err != nil {
+		return nil, err
+	}
+	// Hardening: refuse symlink traversal for directories.
+	if err := fileutil.VerifyDirNoSymlink(dir); err != nil {
+		return nil, err
+	}
+
+	entries, err := fileutil.ListDirectoryNormalized(dir, args.Pattern)
 	if err != nil {
 		return nil, err
 	}

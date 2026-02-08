@@ -36,7 +36,7 @@ func TestDeleteFile(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
 
-				_, err := DeleteFile(ctx, DeleteFileArgs{Path: p, TrashDir: filepath.Join(tmp, "trash")})
+				_, err := deleteFile(ctx, DeleteFileArgs{Path: p, TrashDir: filepath.Join(tmp, "trash")}, "", nil)
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got: %v", err)
 				}
@@ -50,10 +50,10 @@ func TestDeleteFile(t *testing.T) {
 			run: func(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := DeleteFile(t.Context(), DeleteFileArgs{
+				_, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     filepath.Join(tmp, "missing.txt"),
 					TrashDir: filepath.Join(tmp, "trash"),
-				})
+				}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -67,10 +67,10 @@ func TestDeleteFile(t *testing.T) {
 			run: func(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := DeleteFile(t.Context(), DeleteFileArgs{
+				_, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     tmp,
 					TrashDir: filepath.Join(tmp, "trash"),
-				})
+				}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -85,12 +85,12 @@ func TestDeleteFile(t *testing.T) {
 				writeFile(t, p, []byte("hello"))
 
 				trash := filepath.Join(tmp, "trash")
-				out, err := DeleteFile(t.Context(), DeleteFileArgs{
+				out, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     "  " + p + "  ",
 					TrashDir: "  " + trash + "  ",
-				})
+				}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile: %v", err)
+					t.Fatalf("deleteFile: %v", err)
 				}
 				if out == nil {
 					t.Fatalf("expected non-nil out")
@@ -123,15 +123,15 @@ func TestDeleteFile(t *testing.T) {
 
 				p := filepath.Join(tmp, "same.txt")
 				writeFile(t, p, []byte("one"))
-				out1, err := DeleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash})
+				out1, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile #1: %v", err)
+					t.Fatalf("deleteFile #1: %v", err)
 				}
 
 				writeFile(t, p, []byte("two"))
-				out2, err := DeleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash})
+				out2, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile #2: %v", err)
+					t.Fatalf("deleteFile #2: %v", err)
 				}
 
 				if out1.TrashedPath == out2.TrashedPath {
@@ -163,7 +163,7 @@ func TestDeleteFile(t *testing.T) {
 				trashAsFile := filepath.Join(tmp, "trash")
 				writeFile(t, trashAsFile, []byte("not a dir"))
 
-				_, err := DeleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trashAsFile})
+				_, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trashAsFile}, "", nil)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -189,9 +189,9 @@ func TestDeleteFile(t *testing.T) {
 				p := filepath.Join(tmp, "auto.txt")
 				writeFile(t, p, []byte("x"))
 
-				out, err := DeleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "auto"})
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "auto"}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile(auto): %v", err)
+					t.Fatalf("deleteFile(auto): %v", err)
 				}
 
 				var wantTrash string
@@ -250,9 +250,9 @@ func TestDeleteFile(t *testing.T) {
 				p := filepath.Join(tmp, "auto.txt")
 				writeFile(t, p, []byte("x"))
 
-				out, err := DeleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "   "})
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "   "}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile(auto whitespace): %v", err)
+					t.Fatalf("deleteFile(auto whitespace): %v", err)
 				}
 				wantFallback := filepath.Join(filepath.Dir(p), ".trash")
 				if filepath.Clean(filepath.Dir(out.TrashedPath)) != filepath.Clean(wantFallback) {
@@ -277,9 +277,9 @@ func TestDeleteFile(t *testing.T) {
 				}
 
 				trash := filepath.Join(tmp, "trash")
-				out, err := DeleteFile(t.Context(), DeleteFileArgs{Path: link, TrashDir: trash})
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: link, TrashDir: trash}, "", nil)
 				if err != nil {
-					t.Fatalf("DeleteFile: %v", err)
+					t.Fatalf("deleteFile: %v", err)
 				}
 
 				if _, err := os.Stat(target); err != nil {

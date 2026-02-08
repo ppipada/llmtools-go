@@ -124,7 +124,7 @@ func TestMIMEForExtension(t *testing.T) {
 				ctx = tt.ctx(t)
 			}
 
-			out, err := MIMEForExtension(ctx, tt.args)
+			out, err := mimeForExtension(ctx, tt.args)
 
 			if tt.wantErr {
 				if err == nil {

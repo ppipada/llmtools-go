@@ -32,7 +32,7 @@ var writeFileTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute path of the file to write."
+		"description": "Path of the file to write."
 	},
 	"encoding": {
 		"type": "string",
@@ -65,10 +65,6 @@ var writeFileTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func WriteFileTool() spec.Tool {
-	return toolutil.CloneTool(writeFileTool)
-}
-
 type WriteFileArgs struct {
 	Path          string `json:"path"`
 	Encoding      string `json:"encoding,omitempty"` // "text"(default) | "binary"
@@ -82,18 +78,17 @@ type WriteFileOut struct {
 	BytesWritten int64  `json:"bytesWritten"`
 }
 
-func WriteFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
-	return toolutil.WithRecoveryResp(func() (*WriteFileOut, error) {
-		return writeFile(ctx, args)
-	})
-}
-
-func writeFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
+func writeFile(
+	ctx context.Context,
+	args WriteFileArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*WriteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	p, err := fileutil.NormalizeAbsPath(strings.TrimSpace(args.Path))
+	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

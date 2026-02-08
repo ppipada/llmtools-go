@@ -33,7 +33,7 @@ var readFileTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute or relative path of the file to read."
+		"description": "Path of the file to read."
 	},
 	"encoding": {
 		"type": "string",
@@ -51,24 +51,19 @@ var readFileTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func ReadFileTool() spec.Tool {
-	return toolutil.CloneTool(readFileTool)
-}
-
 type ReadFileArgs struct {
 	Path     string `json:"path"`               // required
 	Encoding string `json:"encoding,omitempty"` // "text" (default) | "binary"
 }
 
-// ReadFile reads a file from disk and returns its contents.
+// readFile reads a file from disk and returns its contents.
 // If Encoding == "binary" the output is base64-encoded.
-func ReadFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
-	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
-		return readFile(ctx, args)
-	})
-}
-
-func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUnion, error) {
+func readFile(
+	ctx context.Context,
+	args ReadFileArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) ([]spec.ToolStoreOutputUnion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -81,12 +76,7 @@ func readFile(ctx context.Context, args ReadFileArgs) ([]spec.ToolStoreOutputUni
 		return nil, errors.New(`encoding must be "text" or "binary"`)
 	}
 
-	path := strings.TrimSpace(args.Path)
-	if path == "" {
-		return nil, fileutil.ErrInvalidPath
-	}
-
-	p, err := fileutil.NormalizePath(path)
+	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -47,10 +46,6 @@ var searchFilesTool = spec.Tool{
 	ModifiedAt: spec.SchemaStartTime,
 }
 
-func SearchFilesTool() spec.Tool {
-	return toolutil.CloneTool(searchFilesTool)
-}
-
 type SearchFilesArgs struct {
 	Root       string `json:"root,omitempty"` // default "."
 	Pattern    string `json:"pattern"`        // required (RE2)
@@ -62,21 +57,31 @@ type SearchFilesOut struct {
 	Matches           []string `json:"matches"`
 }
 
-// SearchFiles walks Root (recursively) and returns up to MaxResults files
+// searchFiles walks Root (recursively) and returns up to MaxResults files
 // whose *path* or *UTF-8 text content* match the supplied regexp.
-func SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
-	return toolutil.WithRecoveryResp(func() (*SearchFilesOut, error) {
-		return searchFiles(ctx, args)
-	})
-}
-
-func searchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
-	matches, reachedLimit, err := fileutil.SearchFiles(ctx, args.Root, args.Pattern, args.MaxResults)
+func searchFiles(
+	ctx context.Context,
+	args SearchFilesArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*SearchFilesOut, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Root, ".")
+	if err != nil {
+		return nil, err
+	}
+	if err := fileutil.VerifyDirNoSymlink(root); err != nil {
+		return nil, err
+	}
+	matches, reachedLimit, err := fileutil.SearchFiles(ctx, root, args.Pattern, args.MaxResults)
 	if err != nil {
 		return nil, err
 	}
 	return &SearchFilesOut{
-		Matches: matches, MatchCount: len(matches),
+		Matches:           matches,
+		MatchCount:        len(matches),
 		ReachedMaxResults: reachedLimit,
 	}, nil
 }

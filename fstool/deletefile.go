@@ -32,7 +32,7 @@ var deleteFileTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute or relative path of the file to delete."
+		"description": "Path of the file to delete."
 	},
 	"trashDir": {
 		"type": "string",
@@ -48,10 +48,6 @@ var deleteFileTool = spec.Tool{
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
-}
-
-func DeleteFileTool() spec.Tool {
-	return toolutil.CloneTool(deleteFileTool)
 }
 
 type DeleteFileArgs struct {
@@ -78,18 +74,17 @@ type trashCandidate struct {
 	allowCrossDeviceCopy bool
 }
 
-func DeleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteFileOut, error) {
-	return toolutil.WithRecoveryResp(func() (*DeleteFileOut, error) {
-		return deleteFile(ctx, args)
-	})
-}
-
-func deleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteFileOut, error) {
+func deleteFile(
+	ctx context.Context,
+	args DeleteFileArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*DeleteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	src, err := fileutil.NormalizePath(strings.TrimSpace(args.Path))
+	src, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err
 	}
@@ -115,17 +110,20 @@ func deleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteFileOut, error
 	candidates := []trashCandidate{}
 	if trashDirIn == "auto" {
 		if sys, ok := detectSystemTrashDir(); ok {
-			// "auto" should prefer system trash *when possible*; treat EXDEV as "not possible"
-			// so we can fall back to a same-filesystem .trash instead of doing a huge copy.
-			candidates = append(candidates, trashCandidate{dir: sys, allowCrossDeviceCopy: false})
+			sys = fileutil.ApplyDarwinSystemRootAliases(sys)
+			if err := fileutil.EnsurePathWithinAllowedRoots(sys, allowedRoots); err == nil {
+				// "auto" should prefer system trash *when possible*; treat EXDEV as "not possible"
+				// so we can fall back to a same-filesystem .trash instead of doing a huge copy.
+				candidates = append(candidates, trashCandidate{dir: sys, allowCrossDeviceCopy: false})
+			}
 		}
 		// Always provide a same-filesystem-ish fallback near the file.
-		candidates = append(
-			candidates,
-			trashCandidate{dir: filepath.Join(filepath.Dir(src), ".trash"), allowCrossDeviceCopy: true},
-		)
+		local := filepath.Join(filepath.Dir(src), ".trash")
+		if err := fileutil.EnsurePathWithinAllowedRoots(local, allowedRoots); err == nil {
+			candidates = append(candidates, trashCandidate{dir: local, allowCrossDeviceCopy: true})
+		}
 	} else {
-		td, err := fileutil.NormalizePath(trashDirIn)
+		td, err := fileutil.ResolvePath(workBaseDir, allowedRoots, trashDirIn, "")
 		if err != nil {
 			return nil, err
 		}

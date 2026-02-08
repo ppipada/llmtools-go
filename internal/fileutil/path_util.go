@@ -16,6 +16,53 @@ import (
 
 var errPathMustBeAbsolute = errors.New("path must be absolute")
 
+var errWindowsDriveRelativePath = errors.New(
+	"windows drive-relative paths like `C:foo` are not supported; use `C:\\foo` or a relative path without a drive letter",
+)
+
+// ResolvePath resolves an input path (absolute or relative) to an absolute path:
+//   - relative paths resolve against workBaseDir
+//   - enforces allowedRoots (if set)
+//   - normalizes OS-specific separators and cleans path
+//   - applies macOS root-level compatibility symlink aliases (e.g. /var -> /private/var)
+func ResolvePath(workBaseDir string, allowedRoots []string, inputPath, defaultIfEmpty string) (string, error) {
+	s := strings.TrimSpace(inputPath)
+	if s == "" {
+		s = strings.TrimSpace(defaultIfEmpty)
+	}
+
+	norm, err := NormalizePath(s)
+	if err != nil {
+		return "", err
+	}
+
+	// Harden Windows: reject ambiguous "C:foo" drive-relative paths.
+	if runtime.GOOS == toolutil.GOOSWindows {
+		if vol := filepath.VolumeName(norm); vol != "" && !filepath.IsAbs(norm) {
+			return "", errWindowsDriveRelativePath
+		}
+	}
+
+	// Resolve relative against base.
+	if !filepath.IsAbs(norm) {
+		norm = filepath.Join(workBaseDir, norm)
+	}
+
+	abs, err := filepath.Abs(norm)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	// Keep macOS paths coherent with CanonicalizeAllowedRoots/GetEffectiveWorkDir behavior.
+	abs = ApplyDarwinSystemRootAliases(abs)
+
+	if err := EnsurePathWithinAllowedRoots(abs, allowedRoots); err != nil {
+		return "", fmt.Errorf("path %q is outside allowed roots", abs)
+	}
+	return abs, nil
+}
+
 // EnsureDirNoSymlink creates missing directories one component at a time,
 // refusing to traverse symlink components.
 // "maxNewDirs: 0 => unlimited"; otherwise limits how many missing dirs it will create.
@@ -176,62 +223,4 @@ func randomHex(nBytes int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// allowDarwinSystemSymlink checks whether cur is one of the macOS compatibility
-// symlinks and (if so) returns the expected resolved absolute directory.
-//
-// This allows us to keep "no symlink traversal" behavior while permitting:
-//
-//	/var -> /private/var
-//	/tmp -> /private/tmp
-//	/etc -> /private/etc
-//
-// (You can extend this list if needed, but keep it small.)
-func allowDarwinSystemSymlink(cur string) (resolved string, ok bool, err error) {
-	if runtime.GOOS != toolutil.GOOSDarwin {
-		return "", false, nil
-	}
-	// Only allow exact root-level paths.
-	expected := map[string]string{
-		"/var":  "/private/var",
-		"/tmp":  "/private/tmp",
-		"/etc":  "/private/etc",
-		"/bin":  "/usr/bin",
-		"/sbin": "/usr/sbin",
-		"/lib":  "/usr/lib",
-	}[cur]
-	if expected == "" {
-		return "", false, nil
-	}
-
-	target, rerr := os.Readlink(cur)
-	if rerr != nil {
-		return "", false, rerr
-	}
-
-	// Readlink may return relative targets like "private/var".
-	res := target
-	if !filepath.IsAbs(res) {
-		res = filepath.Join(filepath.Dir(cur), res)
-	}
-	res = filepath.Clean(res)
-
-	if res != expected {
-		return "", false, nil
-	}
-
-	// Ensure the resolved target is a real directory (and not itself a symlink).
-	st, serr := os.Lstat(res)
-	if serr != nil {
-		return "", false, serr
-	}
-	if (st.Mode() & os.ModeSymlink) != 0 {
-		return "", false, nil
-	}
-	if !st.IsDir() {
-		return "", false, nil
-	}
-
-	return res, true, nil
 }

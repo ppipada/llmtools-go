@@ -3,10 +3,8 @@ package fstool
 import (
 	"context"
 	"path/filepath"
-	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -27,7 +25,7 @@ var mimeForPathTool = spec.Tool{
 "properties": {
 	"path": {
 		"type": "string",
-		"description": "Absolute or relative filesystem path."
+		"description": "Path of the file to check."
 	}
 },
 "required": ["path"],
@@ -37,10 +35,6 @@ var mimeForPathTool = spec.Tool{
 
 	CreatedAt:  spec.SchemaStartTime,
 	ModifiedAt: spec.SchemaStartTime,
-}
-
-func MIMEForPathTool() spec.Tool {
-	return toolutil.CloneTool(mimeForPathTool)
 }
 
 type MIMEDetectMethod string
@@ -64,24 +58,23 @@ type MIMEForPathOut struct {
 	Method              MIMEDetectMethod `json:"method"`
 }
 
-// MIMEForPath returns a best-effort MIME type for a filesystem path.
+// mimeForPath returns a best-effort MIME type for a filesystem path.
 //
 // Notes:
 // - If the extension maps to a non-generic MIME type, it may succeed even if the file does not exist.
 // - If the extension is unknown/generic, it tries to open and sniff the file (can error if unreadable).
-func MIMEForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
-	return toolutil.WithRecoveryResp(func() (*MIMEForPathOut, error) {
-		return mimeForPath(ctx, args)
-	})
-}
-
-func mimeForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
+func mimeForPath(
+	ctx context.Context,
+	args MIMEForPathArgs,
+	workBaseDir string,
+	allowedRoots []string,
+) (*MIMEForPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path := strings.TrimSpace(args.Path)
-	if path == "" {
-		return nil, fileutil.ErrInvalidPath
+	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	if err != nil {
+		return nil, err
 	}
 
 	ext := filepath.Ext(path)

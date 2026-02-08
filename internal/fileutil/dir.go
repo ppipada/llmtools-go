@@ -21,6 +21,15 @@ func ListDirectory(path, pattern string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ListDirectoryNormalized(dir, pattern)
+}
+
+// ListDirectoryNormalized lists entries in a directory that is assumed to be already normalized.
+// It does not normalize or resolve relative paths; callers must do that.
+func ListDirectoryNormalized(dir, pattern string) ([]string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return nil, ErrInvalidPath
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -74,10 +83,28 @@ func GetEffectiveWorkDir(inputWorkDir string, allowedRoots []string) (string, er
 	if err := ensureDirExists(p); err != nil {
 		return "", err
 	}
-	if err := ensureWorkdirAllowed(p, allowedRoots); err != nil {
-		return "", err
+	if err := EnsurePathWithinAllowedRoots(p, allowedRoots); err != nil {
+		return "", fmt.Errorf("workdir %q is outside allowed roots", p)
 	}
 	return p, nil
+}
+
+// EnsurePathWithinAllowedRoots enforces that p is within at least one root.
+// If roots is empty, it allows everything.
+func EnsurePathWithinAllowedRoots(p string, roots []string) error {
+	if len(roots) == 0 {
+		return nil
+	}
+	for _, r := range roots {
+		ok, err := IsPathWithinRoot(r, p)
+		if err != nil {
+			continue
+		}
+		if ok {
+			return nil
+		}
+	}
+	return fmt.Errorf("path %q is outside allowed roots", p)
 }
 
 func canonicalWorkdir(p string) (string, error) {
@@ -109,23 +136,7 @@ func ensureDirExists(p string) error {
 	return nil
 }
 
-func ensureWorkdirAllowed(p string, roots []string) error {
-	if len(roots) == 0 {
-		return nil
-	}
-	for _, r := range roots {
-		ok, err := pathWithinRoot(r, p)
-		if err != nil {
-			continue
-		}
-		if ok {
-			return nil
-		}
-	}
-	return fmt.Errorf("workdir %q is outside allowed roots", p)
-}
-
-func pathWithinRoot(root, p string) (bool, error) {
+func IsPathWithinRoot(root, p string) (bool, error) {
 	rel, err := filepath.Rel(root, p)
 	if err != nil {
 		return false, err
