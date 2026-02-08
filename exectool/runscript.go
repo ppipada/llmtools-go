@@ -18,7 +18,7 @@ const runScriptFuncID spec.FuncID = "github.com/flexigpt/llmtools-go/exectool/ru
 
 var runScriptToolSpec = spec.Tool{
 	SchemaVersion: spec.SchemaVersion,
-	ID:            "01j0b303-0d6a-7a9f-b52c-2a7ac3f3b7f4",
+	ID:            "019c3df0-e332-717f-85d1-3d752f9f6046",
 	Slug:          "runscript",
 	Version:       "v1.0.0",
 	DisplayName:   "Run Script",
