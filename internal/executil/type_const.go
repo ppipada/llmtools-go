@@ -1,5 +1,24 @@
 package executil
 
+import "time"
+
+// Fixed, package-wide hard limits (single source of truth).
+const (
+	HardMaxTimeout             = 10 * time.Minute
+	HardMaxOutputBytes   int64 = 4 * 1024 * 1024 // per stream
+	HardMaxCommands            = 64
+	HardMaxCommandLength       = 64 * 1024 // bytes
+	MinOutputBytes       int64 = 1024
+
+	DefaultTimeout                = 60 * time.Second
+	DefaultMaxOutputBytes   int64 = 256 * 1024
+	DefaultMaxCommands            = 64
+	DefaultMaxCommandLength       = 64 * 1024
+
+	defaultSessionTTL  = 30 * time.Minute
+	defaultMaxSessions = 256
+)
+
 type ShellName string
 
 const (
@@ -22,6 +41,28 @@ const (
 	dialectPowerShell
 	dialectCmd
 )
+
+type SelectedShell struct {
+	Name ShellName
+	Path string
+}
+
+type ShellCommandExecResult struct {
+	Command   string    `json:"command"`
+	Workdir   string    `json:"workdir"`
+	Shell     ShellName `json:"shell"`
+	ShellPath string    `json:"shellPath"`
+
+	ExitCode   int   `json:"exitCode"`
+	TimedOut   bool  `json:"timedOut"`
+	DurationMS int64 `json:"durationMS"`
+
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+
+	StdoutTruncated bool `json:"stdoutTruncated"`
+	StderrTruncated bool `json:"stderrTruncated"`
+}
 
 var HardBlockedCommands = func() map[string]struct{} {
 	// Non-overridable baseline. These are blocked regardless of AllowDangerous.

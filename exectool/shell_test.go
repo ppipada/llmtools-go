@@ -82,7 +82,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
 			}
 
-			if got := st.sessions.sizeForTest(); got != 0 {
+			if got := st.sessions.Size(); got != 0 {
 				t.Fatalf("expected no sessions left, found %d", got)
 			}
 		})
@@ -143,84 +143,31 @@ func TestNormalizedCommandList(t *testing.T) {
 
 func TestPolicy_EffectiveTimeout_UsesDefaultAndClampsToHardMax(t *testing.T) {
 	p := ShellCommandPolicy{}
-	if got := effectiveTimeout(p); got != DefaultTimeout {
-		t.Fatalf("expected DefaultTimeout=%v got %v", DefaultTimeout, got)
+	if got := effectiveTimeout(p); got != executil.DefaultTimeout {
+		t.Fatalf("expected DefaultTimeout=%v got %v", executil.DefaultTimeout, got)
 	}
 
 	p.Timeout = 999 * time.Hour
-	if got := effectiveTimeout(p); got != HardMaxTimeout {
-		t.Fatalf("expected clamp to HardMaxTimeout=%v got %v", HardMaxTimeout, got)
+	if got := effectiveTimeout(p); got != executil.HardMaxTimeout {
+		t.Fatalf("expected clamp to HardMaxTimeout=%v got %v", executil.HardMaxTimeout, got)
 	}
 }
 
 func TestPolicy_EffectiveMaxOutputBytes_UsesDefaultAndClamps(t *testing.T) {
 	p := ShellCommandPolicy{}
-	if got := effectiveMaxOutputBytes(p); got != DefaultMaxOutputBytes {
-		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", DefaultMaxOutputBytes, got)
+	if got := effectiveMaxOutputBytes(p); got != executil.DefaultMaxOutputBytes {
+		t.Fatalf("expected DefaultMaxOutputBytes=%d got %d", executil.DefaultMaxOutputBytes, got)
 	}
 
 	p.MaxOutputBytes = 1
-	if got := effectiveMaxOutputBytes(p); got != MinOutputBytes {
-		t.Fatalf("expected clamp to MinOutputBytes=%d got %d", MinOutputBytes, got)
+	if got := effectiveMaxOutputBytes(p); got != executil.MinOutputBytes {
+		t.Fatalf("expected clamp to MinOutputBytes=%d got %d", executil.MinOutputBytes, got)
 	}
 
 	p.MaxOutputBytes = 1 << 62
-	if got := effectiveMaxOutputBytes(p); got != min(HardMaxOutputBytes, int64(^uint(0)>>1)) {
+	if got := effectiveMaxOutputBytes(p); got != min(executil.HardMaxOutputBytes, int64(^uint(0)>>1)) {
 		// The implementation clamps to HardMaxOutputBytes and also to MaxInt.
 		t.Fatalf("expected clamp to hard max, got %d", got)
-	}
-}
-
-func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
-	td := t.TempDir()
-
-	got, err := canonicalWorkdir(td)
-	if err != nil {
-		t.Fatalf("canonicalWorkdir error: %v", err)
-	}
-	if !filepath.IsAbs(got) {
-		t.Fatalf("expected abs path, got: %q", got)
-	}
-	if err := ensureDirExists(got); err != nil {
-		t.Fatalf("ensureDirExists error: %v", err)
-	}
-
-	// Not a directory.
-	f := filepath.Join(td, "f")
-	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	_, err = effectiveWorkdir(f, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "not a directory") {
-		t.Fatalf("expected not-a-directory error, got: %v", err)
-	}
-
-	// NUL check.
-	_, err = canonicalWorkdir("bad\x00path")
-	if err == nil || !strings.Contains(err.Error(), "NUL") {
-		t.Fatalf("expected NUL error, got: %v", err)
-	}
-}
-
-func TestValidateEnvMap(t *testing.T) {
-	if err := validateEnvMap(map[string]string{"OK": "1"}); err != nil {
-		t.Fatalf("expected ok, got: %v", err)
-	}
-
-	if err := validateEnvMap(map[string]string{"": "1"}); err == nil {
-		t.Fatalf("expected error for empty key")
-	}
-
-	if err := validateEnvMap(map[string]string{"A=B": "1"}); err == nil {
-		t.Fatalf("expected error for key containing '='")
-	}
-
-	if err := validateEnvMap(map[string]string{"A\x00": "1"}); err == nil {
-		t.Fatalf("expected error for NUL in key")
-	}
-
-	if err := validateEnvMap(map[string]string{"A": "1\x00"}); err == nil {
-		t.Fatalf("expected error for NUL in value")
 	}
 }
 
@@ -257,60 +204,6 @@ func TestSelectShell_ResolveAndAuto(t *testing.T) {
 	_, err = selectShell(ShellName("nope"))
 	if err == nil || !strings.Contains(err.Error(), "invalid shell") {
 		t.Fatalf("expected invalid shell error, got: %v", err)
-	}
-}
-
-func TestEffectiveEnv_OrderIsDeterministicNonDecreasingByCanonicalKey(t *testing.T) {
-	// We can't control all of os.Environ(), but we can assert monotonic ordering.
-	t.Setenv("ZZZ_TEST_ENV", "1")
-	t.Setenv("AAA_TEST_ENV", "2")
-
-	env, err := effectiveEnv(nil, map[string]string{"MMM_TEST_ENV": "3"})
-	if err != nil {
-		t.Fatalf("effectiveEnv error: %v", err)
-	}
-	var prev string
-	for i, kv := range env {
-		k, _, ok := strings.Cut(kv, "=")
-		if !ok {
-			t.Fatalf("bad env entry %q", kv)
-		}
-		ck := canonicalEnvKey(k)
-		if i > 0 && ck < prev {
-			t.Fatalf("env not sorted at %d: %q < %q", i, ck, prev)
-		}
-		prev = ck
-	}
-}
-
-func TestCappedWriter_TruncatesAndCounts(t *testing.T) {
-	w := newCappedWriter(1024)
-
-	_, _ = w.Write([]byte(strings.Repeat("a", 600)))
-	_, _ = w.Write([]byte(strings.Repeat("b", 600))) // total 1200 > 1024
-
-	if w.TotalBytes() != 1200 {
-		t.Fatalf("expected totalBytes 1200, got %d", w.TotalBytes())
-	}
-	if !w.Truncated() {
-		t.Fatalf("expected truncated=true")
-	}
-	if got := len(w.Bytes()); got != 1024 {
-		t.Fatalf("expected stored bytes len 1024, got %d", got)
-	}
-	b := w.Bytes()
-	if len(b) == 0 || b[len(b)-1] != 'b' {
-		t.Fatalf("expected tail capture ending with 'b'")
-	}
-}
-
-func TestSafeUTF8_ReplacesInvalid(t *testing.T) {
-	s := safeUTF8([]byte{0xff, 0xfe, 'a'})
-	if !strings.Contains(s, "\uFFFD") {
-		t.Fatalf("expected replacement char in %q", s)
-	}
-	if !strings.Contains(s, "a") {
-		t.Fatalf("expected 'a' preserved in %q", s)
 	}
 }
 
@@ -547,61 +440,6 @@ func TestShellCommand_MaxCommandLength_PolicyLimit(t *testing.T) {
 	}
 }
 
-func TestSessionStore_TTL_EvictsWithoutSleep(t *testing.T) {
-	cases := []struct {
-		name      string
-		ttl       time.Duration
-		age       time.Duration
-		wantEvict bool
-	}{
-		{name: "ttl_disabled_never_evicts", ttl: 0, age: 24 * time.Hour, wantEvict: false},
-		{name: "not_old_enough", ttl: 10 * time.Second, age: 1 * time.Second, wantEvict: false},
-		{name: "old_enough", ttl: 100 * time.Millisecond, age: 2 * time.Second, wantEvict: true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ss := newSessionStore()
-			ss.setTTL(tc.ttl)
-
-			s := ss.newSession()
-			if s == nil || s.id == "" {
-				t.Fatalf("expected session")
-			}
-
-			// Force lastUsed to the past deterministically.
-			ss.mu.Lock()
-			e := ss.m[s.id]
-			if e == nil {
-				ss.mu.Unlock()
-				t.Fatalf("missing store entry")
-			}
-			it, _ := e.Value.(*sessionItem)
-			if it == nil {
-				ss.mu.Unlock()
-				t.Fatalf("missing sessionItem")
-			}
-			it.lastUsed = time.Now().Add(-tc.age)
-			ss.mu.Unlock()
-
-			_, ok := ss.get(s.id) // get() performs eviction check
-			if tc.wantEvict && ok {
-				t.Fatalf("expected evicted, but get() returned ok")
-			}
-			if !tc.wantEvict && !ok {
-				t.Fatalf("expected present, but get() returned !ok")
-			}
-
-			s.mu.RLock()
-			closed := s.closed
-			s.mu.RUnlock()
-			if tc.wantEvict && !closed {
-				t.Fatalf("expected closed session after eviction")
-			}
-		})
-	}
-}
-
 func TestSessions_LRU_MaxSessions_EvictsOldest(t *testing.T) {
 	st := newTestShellTool(t, WithShellMaxSessions(1))
 
@@ -720,38 +558,6 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if strings.Contains(resp.Results[0].Stdout, "baz") {
 		t.Fatalf("expected new session not to have baz, got stdout=%q", resp.Results[0].Stdout)
 	}
-}
-
-func TestUnixSpecific_ProcessGroupAndExitCodeHelpers(t *testing.T) {
-	if runtime.GOOS == toolutil.GOOSWindows {
-		t.Skip("unix-specific")
-	}
-
-	// "configureProcessGroup" should set Setpgid=true.
-	cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 0")
-	configureProcessGroup(cmd)
-	if cmd.SysProcAttr == nil {
-		t.Fatalf("expected SysProcAttr set")
-	}
-
-	// "exitCodeFromProcessState" should reflect normal exit and signaled exit.
-	c := exec.CommandContext(t.Context(), "sh", "-c", "exit 9")
-	if err := c.Run(); err == nil {
-		t.Fatalf("expected non-zero exit")
-	}
-	if got := exitCodeFromProcessState(c.ProcessState); got != 9 {
-		t.Fatalf("expected exit code 9, got %d", got)
-	}
-
-	c = exec.CommandContext(t.Context(), "sh", "-c", "kill -9 $$")
-	_ = c.Run() // expect error
-	if got := exitCodeFromProcessState(c.ProcessState); got != 137 {
-		t.Fatalf("expected signaled exit code 137, got %d", got)
-	}
-
-	// "killProcessGroup" should be safe on nils.
-	killProcessGroup(nil)
-	killProcessGroup(&exec.Cmd{})
 }
 
 func TestShellCommand_ContextCanceledEarly(t *testing.T) {

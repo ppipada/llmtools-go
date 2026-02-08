@@ -1,20 +1,16 @@
-package exectool
+package executil
 
 import (
 	"container/list"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
 
-type shellSession struct {
-	id      string
-	workdir string
-	env     map[string]string
-	mu      sync.RWMutex
-	closed  bool
-}
-
-type sessionStore struct {
+type SessionStore struct {
 	mu  sync.Mutex
 	ttl time.Duration
 	max int
@@ -24,17 +20,12 @@ type sessionStore struct {
 }
 
 type sessionItem struct {
-	s        *shellSession
+	s        *ShellSession
 	lastUsed time.Time
 }
 
-const (
-	defaultSessionTTL  = 30 * time.Minute
-	defaultMaxSessions = 256
-)
-
-func newSessionStore() *sessionStore {
-	return &sessionStore{
+func NewSessionStore() *SessionStore {
+	return &SessionStore{
 		ttl: defaultSessionTTL,
 		max: defaultMaxSessions,
 		lru: list.New(),
@@ -42,7 +33,7 @@ func newSessionStore() *sessionStore {
 	}
 }
 
-func (ss *sessionStore) setTTL(ttl time.Duration) {
+func (ss *SessionStore) SetTTL(ttl time.Duration) {
 	if ttl < 0 {
 		ttl = 0
 	}
@@ -52,7 +43,7 @@ func (ss *sessionStore) setTTL(ttl time.Duration) {
 	ss.mu.Unlock()
 }
 
-func (ss *sessionStore) setMaxSessions(maxSessions int) {
+func (ss *SessionStore) SetMaxSessions(maxSessions int) {
 	if maxSessions < 0 {
 		maxSessions = 0
 	}
@@ -62,7 +53,7 @@ func (ss *sessionStore) setMaxSessions(maxSessions int) {
 	ss.mu.Unlock()
 }
 
-func (ss *sessionStore) newSession() *shellSession {
+func (ss *SessionStore) NewSession() *ShellSession {
 	now := time.Now()
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -70,7 +61,7 @@ func (ss *sessionStore) newSession() *shellSession {
 	ss.evictOverLimitLocked()
 
 	id := newSessionID()
-	s := &shellSession{
+	s := &ShellSession{
 		id:      id,
 		workdir: "",
 		env:     map[string]string{},
@@ -83,7 +74,7 @@ func (ss *sessionStore) newSession() *shellSession {
 	return s
 }
 
-func (ss *sessionStore) get(id string) (*shellSession, bool) {
+func (ss *SessionStore) Get(id string) (*ShellSession, bool) {
 	now := time.Now()
 	ss.mu.Lock()
 	ss.evictExpiredLocked(now)
@@ -113,7 +104,7 @@ func (ss *sessionStore) get(id string) (*shellSession, bool) {
 	return s, true
 }
 
-func (ss *sessionStore) delete(id string) {
+func (ss *SessionStore) Delete(id string) {
 	ss.mu.Lock()
 	e := ss.m[id]
 	if e != nil {
@@ -122,7 +113,13 @@ func (ss *sessionStore) delete(id string) {
 	ss.mu.Unlock()
 }
 
-func (ss *sessionStore) evictExpiredLocked(now time.Time) {
+func (ss *SessionStore) Size() int {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return len(ss.m)
+}
+
+func (ss *SessionStore) evictExpiredLocked(now time.Time) {
 	if ss.ttl <= 0 {
 		return
 	}
@@ -144,7 +141,7 @@ func (ss *sessionStore) evictExpiredLocked(now time.Time) {
 	}
 }
 
-func (ss *sessionStore) evictOverLimitLocked() {
+func (ss *SessionStore) evictOverLimitLocked() {
 	if ss.max <= 0 {
 		return
 	}
@@ -157,7 +154,7 @@ func (ss *sessionStore) evictOverLimitLocked() {
 	}
 }
 
-func (ss *sessionStore) deleteElemLocked(e *list.Element) {
+func (ss *SessionStore) deleteElemLocked(e *list.Element) {
 	if e == nil {
 		return
 	}
@@ -175,8 +172,11 @@ func (ss *sessionStore) deleteElemLocked(e *list.Element) {
 	it.s.mu.Unlock()
 }
 
-func (ss *sessionStore) sizeForTest() int {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	return len(ss.m)
+func newSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return "sess_" + hex.EncodeToString(b[:])
+	}
+	now := time.Now().UTC().UnixNano()
+	return fmt.Sprintf("sess_%d_%d", now, os.Getpid())
 }
