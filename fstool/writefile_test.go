@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -44,7 +45,7 @@ func TestWriteFile(t *testing.T) {
 				if err != nil {
 					t.Fatalf("writeFile: %v", err)
 				}
-				if out.Path != p || out.BytesWritten != 5 {
+				if out.Path != fileutil.ApplyDarwinSystemRootAliases(p) || out.BytesWritten != 5 {
 					t.Fatalf("unexpected out: %+v", out)
 				}
 				b, err := os.ReadFile(p)

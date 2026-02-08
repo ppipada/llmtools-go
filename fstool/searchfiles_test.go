@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 )
 
 // TestSearchFiles covers happy, error, and boundary cases for SearchFiles.
@@ -60,17 +62,17 @@ func TestSearchFiles(t *testing.T) {
 		{
 			name: "Match file path",
 			args: SearchFilesArgs{Root: tmpDir, Pattern: "foo\\.txt"},
-			want: []string{filepath.Join(tmpDir, "foo.txt")},
+			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "foo.txt")},
 		},
 		{
 			name: "Match file content",
 			args: SearchFilesArgs{Root: tmpDir, Pattern: "goodbye"},
-			want: []string{filepath.Join(tmpDir, "bar.md")},
+			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "bar.md")},
 		},
 		{
 			name: "Match in subdirectory",
 			args: SearchFilesArgs{Root: tmpDir, Pattern: "baz"},
-			want: []string{filepath.Join(tmpDir, "sub", "baz.txt")},
+			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "sub", "baz.txt")},
 		},
 		{
 			name: "MaxResults limits output",

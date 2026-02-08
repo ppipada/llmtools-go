@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -95,7 +96,11 @@ func TestDeleteFile(t *testing.T) {
 				if out == nil {
 					t.Fatalf("expected non-nil out")
 				}
-				if gotDir := filepath.Clean(filepath.Dir(out.TrashedPath)); gotDir != filepath.Clean(trash) {
+				if gotDir := filepath.Clean(
+					filepath.Dir(out.TrashedPath),
+				); gotDir != filepath.Clean(
+					fileutil.ApplyDarwinSystemRootAliases(trash),
+				) {
 					t.Fatalf("trashed dir=%q want=%q (out=%+v)", gotDir, trash, out)
 				}
 				if out.Method != DeleteFileMethodRename {
@@ -197,7 +202,7 @@ func TestDeleteFile(t *testing.T) {
 				var wantTrash string
 				switch runtime.GOOS {
 				case toolutil.GOOSDarwin:
-					wantTrash = filepath.Join(tmpHome, ".Trash")
+					wantTrash = fileutil.ApplyDarwinSystemRootAliases(filepath.Join(tmpHome, ".Trash"))
 				case toolutil.GOOSLinux,
 					toolutil.GOOSFreebsd,
 					toolutil.GOOSOpenbsd,
@@ -255,7 +260,11 @@ func TestDeleteFile(t *testing.T) {
 					t.Fatalf("deleteFile(auto whitespace): %v", err)
 				}
 				wantFallback := filepath.Join(filepath.Dir(p), ".trash")
-				if filepath.Clean(filepath.Dir(out.TrashedPath)) != filepath.Clean(wantFallback) {
+				if filepath.Clean(
+					filepath.Dir(out.TrashedPath),
+				) != filepath.Clean(
+					fileutil.ApplyDarwinSystemRootAliases(wantFallback),
+				) {
 					t.Fatalf("trashed dir=%q want fallback=%q", filepath.Dir(out.TrashedPath), wantFallback)
 				}
 			},
