@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/flexigpt/llmtools-go/internal/fileutil"
 )
 
 func TestReadImage(t *testing.T) {
@@ -66,7 +68,11 @@ func TestReadImage(t *testing.T) {
 					t.Fatalf("expected Exists=true")
 				}
 				if out.Path != imgPath {
-					t.Fatalf("Path mismatch: got %q want %q", out.Path, imgPath)
+					t.Fatalf(
+						"Path mismatch: got %q want %q",
+						out.Path,
+						fileutil.ApplyDarwinSystemRootAliases(imgPath),
+					)
 				}
 				if out.Name != filepath.Base(imgPath) {
 					t.Fatalf("Name mismatch: got %q want %q", out.Name, filepath.Base(imgPath))
