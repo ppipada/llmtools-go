@@ -132,6 +132,7 @@ type ShellTool struct {
 	mu                  sync.RWMutex
 	policy              ShellCommandPolicy
 	allowedWorkdirRoots []string            // optional; if empty, allow any
+	workdirBase         string              // optional; if set, relative workdir is resolved against this base
 	blockedCommands     map[string]struct{} // instance-owned blocklist (includes non-overridable hard defaults)
 	sessions            *executil.SessionStore
 }
@@ -185,6 +186,26 @@ func WithShellAllowedWorkdirRoots(roots []string) ShellToolOption {
 	}
 }
 
+// WithShellWorkdirBase sets a base directory used to resolve relative ShellCommandArgs.Workdir.
+// If unset, relative workdir is resolved against the current process working directory (existing behavior).
+//
+// This is useful when callers want workdir values to be interpreted relative to a "sandbox root"
+// without re-implementing path joining logic in every wrapper.
+func WithShellWorkdirBase(base string) ShellToolOption {
+	return func(st *ShellTool) error {
+		if strings.TrimSpace(base) == "" {
+			st.workdirBase = ""
+			return nil
+		}
+		p, err := fileutil.GetEffectiveWorkDir(base, nil)
+		if err != nil {
+			return err
+		}
+		st.workdirBase = p
+		return nil
+	}
+}
+
 // WithShellSessionTTL enables TTL eviction for sessions.
 // "ttl<=0" disables TTL eviction (LRU max may still evict).
 func WithShellSessionTTL(ttl time.Duration) ShellToolOption {
@@ -207,8 +228,10 @@ func NewShellTool(opts ...ShellToolOption) (*ShellTool, error) {
 	st := &ShellTool{
 		policy:              DefaultShellCommandPolicy,
 		allowedWorkdirRoots: nil,
-		blockedCommands:     maps.Clone(executil.HardBlockedCommands),
-		sessions:            executil.NewSessionStore(),
+		workdirBase:         "",
+
+		blockedCommands: maps.Clone(executil.HardBlockedCommands),
+		sessions:        executil.NewSessionStore(),
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -298,8 +321,14 @@ func (st *ShellTool) run(ctx context.Context, args ShellCommandArgs) (out *Shell
 	// "executeParallel=true" => treat commands as independent => do not stop on error.
 	stopOnError := !args.ExecuteParallel
 
+	// If base is set and arg is relative, resolve against base.
+	inputWorkDir := args.Workdir
+	if strings.TrimSpace(st.workdirBase) != "" && !filepath.IsAbs(args.Workdir) {
+		inputWorkDir = filepath.Join(st.workdirBase, args.Workdir)
+	}
+
 	// Determine effective workdir (args > session > current).
-	workdir, err := sess.GetEffectiveWorkdir(args.Workdir, roots)
+	workdir, err := sess.GetEffectiveWorkdir(inputWorkDir, roots)
 	if err != nil {
 		return nil, err
 	}

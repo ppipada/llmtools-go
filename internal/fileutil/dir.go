@@ -80,17 +80,6 @@ func GetEffectiveWorkDir(inputWorkDir string, allowedRoots []string) (string, er
 	return p, nil
 }
 
-func ensureDirExists(p string) error {
-	st, err := os.Stat(p)
-	if err != nil {
-		return errors.Join(err, errors.New("no such dir"))
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("workdir is not a directory: %s", p)
-	}
-	return nil
-}
-
 func canonicalWorkdir(p string) (string, error) {
 	if strings.ContainsRune(p, '\x00') {
 		return "", errors.New("workdir contains NUL byte")
@@ -107,6 +96,17 @@ func canonicalWorkdir(p string) (string, error) {
 		abs = resolved
 	}
 	return abs, nil
+}
+
+func ensureDirExists(p string) error {
+	st, err := os.Stat(p)
+	if err != nil {
+		return errors.Join(err, errors.New("no such dir"))
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("workdir is not a directory: %s", p)
+	}
+	return nil
 }
 
 func ensureWorkdirAllowed(p string, roots []string) error {
