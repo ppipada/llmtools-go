@@ -71,7 +71,7 @@ func TestReadImage(t *testing.T) {
 					t.Fatalf(
 						"Path mismatch: got %q want %q",
 						out.Path,
-						fileutil.ApplyDarwinSystemRootAliases(imgPath),
+						filepath.Clean(fileutil.ApplyDarwinSystemRootAliases(imgPath)),
 					)
 				}
 				if out.Name != filepath.Base(imgPath) {
