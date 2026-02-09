@@ -20,7 +20,7 @@ Go-native and cross-platform "tool" implementations for common local tasks, plus
 - [Tool outputs](#tool-outputs)
 - [Sandboxing and path policy](#sandboxing-and-path-policy)
 - [Examples](#examples)
-- [Shell / exec tool notes](#shell--exec-tool-notes)
+- [Exec tool notes](#exec-tool-notes)
 - [Development](#development)
 - [License](#license)
 
@@ -144,7 +144,7 @@ Examples:
 - Filesystem + MIME + safe delete (trash) + binary/image flows: [`fs + image test`](internal/integration/fs_image_test.go)
 - Shell sessions + environment persistence + runscript: [`exec test`](internal/integration/exec_test.go)
 
-## Shell / exec tool notes
+## Exec tool notes
 
 - OS support
   - Cross-platform shell selection: `auto` chooses a safe default per OS.
