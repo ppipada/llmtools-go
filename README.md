@@ -5,142 +5,168 @@
 [![lint](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/lint.yml)
 [![test](https://github.com/flexigpt/llmtools-go/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/flexigpt/llmtools-go/actions/workflows/test.yml)
 
-LLM Tool implementations for Golang
+Go-native and cross-platform "tool" implementations for common local tasks, plus a small registry that makes them easy to expose to LLM tool-calling systems.
 
+## Table of contents
+
+- [Table of contents](#table-of-contents)
 - [Features at a glance](#features-at-a-glance)
+  - [File system tools](#file-system-tools)
+  - [Execute tools](#execute-tools)
+  - [Text processing tools](#text-processing-tools)
+  - [Image tools](#image-tools)
 - [Package overview](#package-overview)
-- [Installation](#installation)
-- [Quickstart](#quickstart)
-  - [Registry with Built-ins](#registry-with-built-ins)
-  - [Direct Tool Usage](#direct-tool-usage)
-- [Shell Tool Notes](#shell-tool-notes)
+- [Registry](#registry)
+- [Tool outputs](#tool-outputs)
+- [Sandboxing \& path policy](#sandboxing--path-policy)
+- [Examples](#examples)
+- [Shell / exec tool notes](#shell--exec-tool-notes)
 - [Development](#development)
 - [License](#license)
 
 ## Features at a glance
 
-- Go-native tool implementations for common local tasks. Current tools:
-  - File system (`fstool`):
-    - List directory (`listdir`): Lists entries under a directory, optionally filtered via glob.
-    - Read file (`readfile`): Reads local files as UTF-8 text (rejects non-text content) or base64 binary (with image/file output kinds). Includes a size cap for safety.
-    - Search files (`searchfiles`): Recursively searches path and (text) content using RE2 regex.
-    - Inspect path (`statpath`): Returns existence, size, timestamps, and directory flag.
+- Sandboxed execution for all tools under a enforced allowed roots and work directory.
+- Symlinks are rejected throughout for safety.
+- All implementations are cross-platform supporting lin/win/mac systems.
+- Normalized tool spec to support text/image/binary output formats.
+- Fully modular code for any customizations needed.
 
-  - Images (`imagetool`):
-    - Read image (`readimage`): Read intrinsic metadata for a local image file, optionally including base64-encoded contents.
+### File system tools
 
-  - Execute Commands (`exectool`):
-    - Execute Shell commands (`shell`): Execute local shell commands (cross-platform) with timeouts, output caps, and session-like persistence for workdir/env. (Check notes below too).
+- Grouped under: `fstool`.
 
-  - Text Processing (`texttool`):
-    - Delete text lines (`deletetextlines`): Delete one or more exact line-block occurrences from a UTF-8 text file. Use beforeLines/afterLines as immediate-adjacent context to disambiguate.
-    - Find text matches with context (`findtext`): Search a UTF-8 text file and return matching lines/blocks with surrounding context lines. Supported Modes: substring, RE2 regex (line-by-line), or exact line-block match.
-    - Insert text lines (`inserttextlines`): Insert lines into a UTF-8 text file at start/end or relative to a uniquely-matched anchor block.
-    - Read text range (`readtextrange`): Read a UTF-8 text file and return lines. Start and end marker lines can be provided to narrow the range.
-    - Replace text lines `replacetextlines`: Replace a block of lines in a UTF-8 text file; use beforeLines/afterLines to make the match more specific.
+- `readfile`:
+  - `encoding=text`: reads UTF-8 text only (rejects non-text), with PDF text extraction support when the file is a PDF.
+  - `encoding=binary`: returns base64, emitting `image` outputs for `image/*` MIME types and `file` outputs otherwise.
+  - Safety: size caps and symlink-traversal hardening.
 
-- Tool registry for:
-  - collecting and listing tool manifests (stable ordering)
-  - invoking tools via JSON input/output with strict JSON input decoding
-  - tool call timeout handling
+- `writefile`:
+  - `encoding=text`: write UTF-8 content
+  - `encoding=binary`: write base64-decoded bytes
+  - Options: `overwrite`, `createParents` (bounded), atomic writes, size caps, symlink hardening.
+
+- `deletefile`:
+  - “Safe delete” by moving to trash.
+  - `trashDir=auto` tries system trash when possible; falls back to a local `.trash` directory.
+  - Uses unique naming, best-effort cross-device handling, and avoids destructive removal when possible.
+
+- `searchfiles`: Recursively search file paths and UTF-8 text content using RE2 regex.
+
+- `listdirectory`: List entries under a directory, optionally filtered by glob.
+
+- `statpath`: Inspect a path (exists, size, timestamps, directory flag).
+- `mimeforpath`: Best-effort MIME type detection (extension + sniffing).
+- `mimeforextension`: MIME lookup for an extension.
+
+### Execute tools
+
+- Grouped under: `exectool`
+
+- `shellcommand`:
+  - Execute one or more commands via a selected shell (`auto`, `sh`, `bash`, `pwsh`, `powershell`, `cmd`, etc).
+  - Enforces timeouts/output caps/command caps.
+  - Supports session-like persistence for workdir and environment across calls (note: _not_ a persistent shell process).
+
+- `runscript`:
+  - Run an existing script from disk with arguments and environment overrides.
+  - Extension-based interpreter selection via `RunScriptPolicy` (host-configurable).
+
+### Text processing tools
+
+- Grouped under: `texttool`
+
+- `readtextrange`: Read lines, optionally constrained by unique start/end marker blocks.
+- `findtext`: Find matches with context (modes: substring, regex (RE2/Go), exact line-block).
+- `inserttextlines`: Insert lines at start/end or relative to a uniquely matched anchor block.
+- `replacetextlines`: Replace exact line blocks; can disambiguate with immediate adjacent `beforeLines`/`afterLines`.
+- `deletetextlines`: Delete exact line blocks; can disambiguate with immediate adjacent `beforeLines`/`afterLines`.
+
+### Image tools
+
+- Grouped under: `imagetool`
+
+- `readimage`: Read intrinsic metadata (width/height/format/MIME), optionally include base64 content.
 
 ## Package overview
 
-- `llmtools`: Registry and registration helpers
-- `spec`: Tool manifests + IO/output schema
+- `llmtools`: Registry + tool registration helpers.
+- `spec`: Tool manifests + output union types.
 - `fstool`: Filesystem tools.
+- `exectool`: Shell command execution and script execution.
+- `texttool`: Safe, deterministic line-based text editing tools.
 - `imagetool`: Image tools.
-- `exectool`: Execute commands.
-- `texttool`: Text tools.
 
-## Installation
+## Registry
 
-```bash
-# Go 1.25+
-go get github.com/flexigpt/llmtools-go
-```
+The registry provides:
 
-## Quickstart
+- tool registration + lookup by `spec.FuncID`
+- stable manifest ordering (`Tools()` sorted by slug + funcID)
+- per-registry default call timeout via `WithDefaultCallTimeout`
+- per-call timeout override via `llmtools.WithCallTimeout(...)`
+- panic-to-error recovery around tool execution
 
-### Registry with Built-ins
+## Tool outputs
 
-```go
-package main
+- `Registry.Call` returns `[]spec.ToolStoreOutputUnion`.
 
-import (
-    "context"
-    "encoding/json"
-    "fmt"
+- The call wrapper can modify the union to support two common patterns:
+  - Structured JSON-as-text (most tools)
+    - Most tools are registered via `RegisterTypedAsTextTool`, which wraps the tool’s Go output as JSON and returns it as a single `text` output item.
 
-    "github.com/flexigpt/llmtools-go"
-    "github.com/flexigpt/llmtools-go/spec"
-)
+  - Typed content outputs
+    - `text` output for UTF-8 text / extracted PDF text
+    - `image` output for images when `encoding=binary`
+    - `file` output for all other binaries when `encoding=binary`
+    - E.g.: `readfile`: This output makes `readfile` suitable for LLM systems that support multi-modal/file outputs.
 
-func main() {
-    r, err := llmtools.NewBuiltinRegistry(
-        llmtools.WithCallTimeoutForAll(10*time.Minute),
-    )
-    if err != nil {
-        panic(err)
-    }
+## Sandboxing & path policy
 
-    // List tool manifests (for prompt/tool definition)
-    for _, t := range r.Tools() {
-        fmt.Printf("%s (%s): %s\n", t.Slug, t.GoImpl.FuncID, t.Description)
-    }
+All `Tools` are are _instance-owned_ tools. Hosts can configure:
 
-    // Call a tool by FuncID using JSON input
-    in := json.RawMessage(`{"path": ".", "pattern": "*.go"}`)
-    out, err := r.Call(context.Background(), spec.FuncID("..."), in)
-    if err != nil {
-        panic(err)
-    }
+- `workBaseDir`: base directory for resolving relative paths
+- `allowedRoots`: optional allowlist roots; when set, all resolved paths must stay within these roots
 
-    fmt.Printf("tool outputs: %+v\n", out)
-}
-```
+This is the recommended way to run the tools safely inside a sandbox (for example, inside a temp workspace or per-user directory).
 
-### Direct Tool Usage
+## Examples
 
-```go
-package main
+All examples are provided as end-to-end integration tests that:
 
-import (
-    "context"
-    "fmt"
+- start from a registry
+- register tools (sandboxed to a temp directory)
+- execute realistic sequences: read/modify loops, text edits, shell sessions, script execution, binary/image workflows
 
-    "github.com/flexigpt/llmtools-go/fstool"
-)
+Examples:
 
-func main() {
-    out, err := fstool.ListDirectory(context.Background(), fstool.ListDirectoryArgs{
-        Path:    ".",
-        Pattern: "*.md",
-    })
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println(out.Entries)
-}
-```
+- Text read/modify loop (find/replace/insert/delete + verification): [`text test`](internal/integration/text_test.go)
+- Filesystem + MIME + safe delete (trash) + binary/image flows: [`fs + image test`](internal/integration/fs_image_test.go)
+- Shell sessions + environment persistence + runscript: [`exec test`](internal/integration/exec_test.go)
 
-## Shell Tool Notes
+## Shell / exec tool notes
 
-- OS support:
-  - Uses Go build constraints (`windows` / `!windows`) to select process-group handling.
-  - No consumer build tags are required.
+- OS support
+  - Cross-platform shell selection: `auto` chooses a safe default per OS.
+  - Windows prefers `pwsh`, then Windows PowerShell, then `cmd`.
 
-- Timeouts:
-  - The tool enforces its own per-command timeout via `timeoutMS`.
-  - If you also set a registry-level timeout (`WithDefaultCallTimeout` or `WithCallTimeout`),
-    ensure it is >= the tool timeout or set it to 0 to avoid early cancellation.
+- Timeouts
+  - The registry may enforce a call timeout (`WithDefaultCallTimeout`).
+  - `shellcommand` and `runscript` also enforce execution policy timeouts.
+  - Ensure the registry timeout is >= tool execution timeout (or set registry timeout to 0) to avoid premature cancellation.
 
-- Policy knobs:
-  - Hosts can pass a policy into tool instantiation. The default policy is at: `exectool.DefaultShellCommandPolicy`.
+- Safety knobs
+  - `ExecutionPolicy` caps total commands, command length, output bytes, and timeout.
+  - “Hard blocked” commands are always blocked.
+  - Heuristic checks (fork-bomb/backgrounding patterns) can be toggled via `AllowDangerous`.
+
+- RunScriptPolicy
+  - Interpreter selection is extension-based and host-configurable.
+  - Hosts can tighten allowed extensions and interpreter mappings.
 
 ## Development
 
-- Formatting follows `gofumpt` and `golines` via `golangci-lint`, which is also used for linting. All rules are in [.golangci.yml](.golangci.yml).
+- Formatting follows `gofumpt` and `golines` via `golangci-lint`. Rules are in [.golangci.yml](.golangci.yml).
 - Useful scripts are defined in `taskfile.yml`; requires [Task](https://taskfile.dev/).
 - Bug reports and PRs are welcome:
   - Keep the public API (`package llmtools` and `spec`) small and intentional.

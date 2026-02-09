@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -240,6 +241,236 @@ func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
 	_, err = canonicalWorkdir("bad\x00path")
 	if err == nil || !strings.Contains(err.Error(), "NUL") {
 		t.Fatalf("expected NUL error, got: %v", err)
+	}
+}
+
+func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
+	td := t.TempDir()
+
+	// Create entries.
+	if err := os.WriteFile(filepath.Join(td, "b.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(td, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(td, "dir1"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		dir           string
+		pattern       string
+		want          []string
+		wantErrSubstr string
+	}{
+		{name: "empty_dir_invalid", dir: "   ", wantErrSubstr: "invalid"},
+		{name: "nonexistent_dir_errors", dir: filepath.Join(td, "nope"), wantErrSubstr: "no such"},
+		{name: "no_pattern_lists_all_sorted", dir: td, pattern: "", want: []string{"a.txt", "b.txt", "dir1"}},
+		{name: "pattern_filters", dir: td, pattern: "*.txt", want: []string{"a.txt", "b.txt"}},
+		{name: "invalid_glob_errors", dir: td, pattern: "[", wantErrSubstr: "syntax"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ListDirectoryNormalized(tc.dir, tc.pattern)
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("got %#v want %#v", got, tc.want)
+			}
+		})
+	}
+
+	_ = runtime.GOOS
+}
+
+func TestCanonicalizeAllowedRoots_ValidatesExistenceAndDirectories(t *testing.T) {
+	td := t.TempDir()
+	f := filepath.Join(td, "file.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		roots         []string
+		wantLen       int
+		wantErrSubstr string
+	}{
+		{name: "ignores_empty", roots: []string{"", "   ", td}, wantLen: 1},
+		{name: "nonexistent_errors", roots: []string{filepath.Join(td, "nope")}, wantErrSubstr: "no such dir"},
+		{name: "file_is_not_dir_errors", roots: []string{f}, wantErrSubstr: "not a directory"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := CanonicalizeAllowedRoots(tc.roots)
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != tc.wantLen {
+				t.Fatalf("len got=%d want=%d roots=%v", len(got), tc.wantLen, got)
+			}
+			for _, r := range got {
+				if !filepath.IsAbs(r) {
+					t.Fatalf("expected abs root, got %q", r)
+				}
+			}
+		})
+	}
+}
+
+func TestGetEffectiveWorkDir_EnforcesRootsAndExistence(t *testing.T) {
+	td := t.TempDir()
+	td2 := t.TempDir()
+
+	f := filepath.Join(td, "file.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		input         string
+		roots         []string
+		wantErrSubstr string
+		wantSameAs    string
+	}{
+		{name: "empty_errors", input: "   ", roots: nil, wantErrSubstr: "empty workdir"},
+		{name: "nonexistent_errors", input: filepath.Join(td, "nope"), roots: nil, wantErrSubstr: "no such dir"},
+		{name: "file_errors", input: f, roots: nil, wantErrSubstr: "not a directory"},
+		{name: "outside_roots_errors", input: td2, roots: []string{td}, wantErrSubstr: "outside allowed roots"},
+		{name: "within_roots_ok", input: td, roots: []string{td}, wantSameAs: td},
+		{name: "no_roots_allows_any", input: td2, roots: nil, wantSameAs: td2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GetEffectiveWorkDir(tc.input, tc.roots)
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantSameAs != "" {
+				mustSameDir(t, tc.wantSameAs, got)
+			}
+		})
+	}
+}
+
+func TestEnsurePathWithinAllowedRoots(t *testing.T) {
+	td := t.TempDir()
+	td2 := t.TempDir()
+
+	cases := []struct {
+		name          string
+		p             string
+		roots         []string
+		wantErrSubstr string
+	}{
+		{name: "no_roots_allows", p: td2, roots: nil},
+		{name: "within_root_ok", p: td, roots: []string{td}},
+		{name: "outside_root_errors", p: td2, roots: []string{td}, wantErrSubstr: "outside allowed roots"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := EnsurePathWithinAllowedRoots(tc.p, tc.roots)
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestIsPathWithinRoot(t *testing.T) {
+	td := t.TempDir()
+	sub := filepath.Join(td, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		root          string
+		p             string
+		want          bool
+		wantErrSubstr string
+	}{
+		{name: "same_dir_true", root: td, p: td, want: true},
+		{name: "child_true", root: td, p: sub, want: true},
+		{name: "outside_false", root: sub, p: td, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := IsPathWithinRoot(tc.root, tc.p)
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func mustSameDir(t *testing.T, a, b string) {
+	t.Helper()
+	sa, err := os.Stat(a)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", a, err)
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", b, err)
+	}
+	if !os.SameFile(sa, sb) {
+		t.Fatalf("expected same dir:\n  a=%q\n  b=%q", a, b)
 	}
 }
 
