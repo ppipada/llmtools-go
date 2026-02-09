@@ -119,6 +119,7 @@ func canonicalWorkdir(p string) (string, error) {
 	// Best-effort: resolve symlinks to avoid platform-dependent aliases
 	// (e.g. macOS /var -> /private/var) and to harden allowed-root checks.
 	// If resolution fails (odd FS / permissions), keep the absolute path.
+	abs = ApplyDarwinSystemRootAliases(abs)
 	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil && resolved != "" {
 		abs = resolved
 	}
