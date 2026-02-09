@@ -118,7 +118,7 @@ func RequireExistingRegularFileNoSymlink(path string) (fs.FileInfo, error) {
 
 	st, err := os.Lstat(p)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("got stat file error: %w", err)
 	}
 	if (st.Mode() & os.ModeSymlink) != 0 {
 		return nil, fmt.Errorf("refusing to operate on symlink file: %s", p)

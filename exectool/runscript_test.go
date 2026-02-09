@@ -164,7 +164,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 				}),
 			},
 			args:        RunScriptArgs{Path: filepath.Join(scriptDir, "nope.txt")},
-			wantErrSubs: []string{"no such", "file"}, // RequireExistingRegularFileNoSymlink likely fails first.
+			wantErrSubs: []string{"stat", "file"}, // RequireExistingRegularFileNoSymlink likely fails first.
 		},
 		{
 			name: "extension_not_allowed_even_if_mapping_exists",
