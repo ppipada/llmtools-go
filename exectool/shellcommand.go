@@ -98,7 +98,7 @@ type ShellCommandArgs struct {
 
 type ShellCommandExecResult = executil.ShellCommandExecResult
 
-type ShellCommandResponse struct {
+type ShellCommandOut struct {
 	SessionID string                   `json:"sessionID,omitempty"`
 	Workdir   string                   `json:"workdir,omitempty"`
 	Results   []ShellCommandExecResult `json:"results,omitempty"`
@@ -112,7 +112,7 @@ func shellCommand(
 	policy ExecutionPolicy,
 	blocked map[string]struct{},
 	sessions *executil.SessionStore,
-) (out *ShellCommandResponse, err error) {
+) (out *ShellCommandOut, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func shellCommand(
 		}
 	}
 
-	resp := ShellCommandResponse{
+	resp := ShellCommandOut{
 		SessionID: args.SessionID,
 		Workdir:   workdir,
 		Results:   results,

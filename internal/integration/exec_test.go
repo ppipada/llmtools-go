@@ -48,7 +48,7 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 1) First call: create session + set env.
-	resp1 := callJSON[exectool.ShellCommandResponse](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp1 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds1,
 		Env:       map[string]string{"MYVAR": "hello"},
@@ -72,7 +72,7 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 2) Second call: same session, no env provided => session env should persist.
-	resp2 := callJSON[exectool.ShellCommandResponse](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp2 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds2,
 		SessionID: resp1.SessionID,
@@ -82,7 +82,7 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 3) Third call: override env, and that override becomes part of session state.
-	resp3 := callJSON[exectool.ShellCommandResponse](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp3 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds2,
 		Env:       map[string]string{"MYVAR": "bye"},
@@ -93,7 +93,7 @@ func TestE2E_Exec_ShellCommand_SessionEnvWorkdir(t *testing.T) {
 	}
 
 	// 4) Fourth call: no env passed => should still be "bye".
-	resp4 := callJSON[exectool.ShellCommandResponse](t, h.r, "shellcommand", exectool.ShellCommandArgs{
+	resp4 := callJSON[exectool.ShellCommandOut](t, h.r, "shellcommand", exectool.ShellCommandArgs{
 		Shell:     shell,
 		Commands:  cmds3,
 		SessionID: resp1.SessionID,
@@ -140,7 +140,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			CreateParents: true,
 		})
 
-		res := callJSON[exectool.RunScriptResult](t, h.r, "runscript", exectool.RunScriptArgs{
+		res := callJSON[exectool.RunScriptOut](t, h.r, "runscript", exectool.RunScriptArgs{
 			Path:    "hello.ps1",
 			Args:    []string{"world"},
 			Env:     map[string]string{"MYVAR": "hello"},
@@ -165,7 +165,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			CreateParents: true,
 		})
 
-		res := callJSON[exectool.RunScriptResult](t, h.r, "runscript", exectool.RunScriptArgs{
+		res := callJSON[exectool.RunScriptOut](t, h.r, "runscript", exectool.RunScriptArgs{
 			Path:    "hello.sh",
 			Args:    []string{"world"},
 			Env:     map[string]string{"MYVAR": "hello"},

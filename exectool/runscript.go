@@ -65,7 +65,7 @@ type RunScriptArgs struct {
 	Workdir string            `json:"workdir,omitempty"`
 }
 
-type RunScriptResult struct {
+type RunScriptOut struct {
 	Path       string `json:"path"`
 	ExitCode   int    `json:"exit_code"`
 	Stdout     string `json:"stdout,omitempty"`
@@ -236,7 +236,7 @@ func runScript(
 	defaultExecPol ExecutionPolicy,
 	blocked map[string]struct{},
 	pol RunScriptPolicy,
-) (*RunScriptResult, error) {
+) (*RunScriptOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -401,14 +401,14 @@ func runScript(
 
 	res, runErr := executil.RunOneShellCommand(ctx, sel, cmdStrExec, workdirAbs, env, timeout, maxOut)
 	if runErr != nil {
-		return &RunScriptResult{ //nolint:nilerr // For shell exec, we return a exit code on err.
+		return &RunScriptOut{ //nolint:nilerr // For shell exec, we return a exit code on err.
 			Path:     scriptAbs,
 			ExitCode: 127,
 			Stderr:   runErr.Error(),
 		}, nil
 	}
 
-	return &RunScriptResult{
+	return &RunScriptOut{
 		Path:       scriptAbs,
 		ExitCode:   res.ExitCode,
 		Stdout:     res.Stdout,

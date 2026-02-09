@@ -238,8 +238,8 @@ func (et *ExecTool) Tools() []spec.Tool {
 
 func (et *ExecTool) RunScriptTool() spec.Tool { return toolutil.CloneTool(runScriptToolSpec) }
 
-func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScriptResult, error) {
-	return toolutil.WithRecoveryResp(func() (*RunScriptResult, error) {
+func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScriptOut, error) {
+	return toolutil.WithRecoveryResp(func() (*RunScriptOut, error) {
 		base, roots, execPol, blocked, rsPol := et.snapshot()
 		return runScript(ctx, args, base, roots, execPol, blocked, rsPol)
 	})
@@ -247,8 +247,8 @@ func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScri
 
 func (et *ExecTool) ShellCommandTool() spec.Tool { return toolutil.CloneTool(shellCommandToolSpec) }
 
-func (et *ExecTool) ShellCommand(ctx context.Context, args ShellCommandArgs) (*ShellCommandResponse, error) {
-	return toolutil.WithRecoveryResp(func() (*ShellCommandResponse, error) {
+func (et *ExecTool) ShellCommand(ctx context.Context, args ShellCommandArgs) (*ShellCommandOut, error) {
+	return toolutil.WithRecoveryResp(func() (*ShellCommandOut, error) {
 		base, roots, policy, blocked, _ := et.snapshot()
 		return shellCommand(ctx, args, base, roots, policy, blocked, et.sessions)
 	})
