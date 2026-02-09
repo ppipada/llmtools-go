@@ -738,7 +738,7 @@ func TestResolvePath_ReturnsLexicalPath_SymlinkLeafPreserved(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Abs(%q): %v", tc.input, err)
 				}
-				expAbs = filepath.Clean(expAbs)
+				expAbs = filepath.Clean(ApplyDarwinSystemRootAliases(expAbs))
 				if filepath.Clean(got) != expAbs {
 					t.Fatalf("expected lexical symlink path returned.\n  got=%q\n want=%q", got, expAbs)
 				}
