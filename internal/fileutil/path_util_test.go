@@ -688,6 +688,162 @@ func TestUniquePathInDir_BasicAndCollision(t *testing.T) {
 	}
 }
 
+func TestResolvePath_ReturnsLexicalPath_SymlinkLeafPreserved(t *testing.T) {
+	// On Windows, symlink creation often requires privileges / developer mode.
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests are privilege-dependent on Windows")
+	}
+
+	td := t.TempDir()
+
+	mustWriteFileBytes(t, filepath.Join(td, "target.txt"), "hello\n")
+	link := filepath.Join(td, "link.txt")
+	mustSymlinkOrSkip(t, filepath.Join(td, "target.txt"), link)
+
+	cases := []struct {
+		name        string
+		input       string
+		wantSymlink bool
+	}{
+		{name: "symlink_leaf_is_preserved", input: link, wantSymlink: true},
+		{name: "regular_file_is_regular", input: filepath.Join(td, "target.txt"), wantSymlink: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResolvePath("", nil, tc.input, "")
+			if err != nil {
+				t.Fatalf("ResolvePath unexpected error: %v", err)
+			}
+
+			// Ensure we got an absolute lexical path (not "." etc).
+			if !filepath.IsAbs(got) {
+				t.Fatalf("expected absolute path, got %q", got)
+			}
+
+			st, err := os.Lstat(got)
+			if err != nil {
+				t.Fatalf("Lstat(%q): %v", got, err)
+			}
+
+			isLink := (st.Mode() & os.ModeSymlink) != 0
+			if isLink != tc.wantSymlink {
+				t.Fatalf("symlink=%v want=%v (mode=%v path=%q)", isLink, tc.wantSymlink, st.Mode(), got)
+			}
+
+			// Stronger assertion for the symlink case: returned path should still be the symlink path.
+			// If ResolvePath had returned the resolved target, Lstat() would not see a symlink here.
+			if tc.wantSymlink {
+				expAbs, err := filepath.Abs(tc.input)
+				if err != nil {
+					t.Fatalf("Abs(%q): %v", tc.input, err)
+				}
+				expAbs = filepath.Clean(expAbs)
+				if filepath.Clean(got) != expAbs {
+					t.Fatalf("expected lexical symlink path returned.\n  got=%q\n want=%q", got, expAbs)
+				}
+			}
+		})
+	}
+}
+
+func TestResolvePath_AllowedRoots_UsesResolvedPathToPreventSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests are privilege-dependent on Windows")
+	}
+
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	// A real file outside the sandbox.
+	outsideFile := filepath.Join(outside, "outside.txt")
+	mustWriteFileBytes(t, outsideFile, "outside\n")
+
+	// A real file inside the sandbox.
+	insideFile := filepath.Join(root, "inside.txt")
+	mustWriteFileBytes(t, insideFile, "inside\n")
+
+	// Symlink inside root pointing to an inside file: should pass root check.
+	insideLink := filepath.Join(root, "inside-link.txt")
+	mustSymlinkOrSkip(t, insideFile, insideLink)
+
+	// Symlink inside root pointing outside root: should fail root check.
+	escapeLink := filepath.Join(root, "escape-link.txt")
+	mustSymlinkOrSkip(t, outsideFile, escapeLink)
+
+	// Symlinked directory escape: root/linkdir -> outside, then access linkdir/outside.txt.
+	linkDir := filepath.Join(root, "linkdir")
+	mustSymlinkOrSkip(t, outside, linkDir)
+
+	canonRoots, err := CanonicalizeAllowedRoots([]string{root})
+	if err != nil {
+		t.Fatalf("CanonicalizeAllowedRoots: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		base          string
+		input         string // can be absolute or relative
+		wantErrSubstr string
+		wantSymlink   bool // only checked when wantErrSubstr == ""
+	}{
+		{
+			name:        "symlink_to_inside_root_ok_but_leaf_is_still_symlink",
+			base:        root,
+			input:       "inside-link.txt", // relative
+			wantSymlink: true,
+		},
+		{
+			name:          "symlink_file_escape_outside_root_rejected",
+			base:          root,
+			input:         "escape-link.txt", // relative
+			wantErrSubstr: "outside allowed roots",
+		},
+		{
+			name:          "symlink_dir_escape_outside_root_rejected",
+			base:          root,
+			input:         filepath.Join("linkdir", "outside.txt"), // relative through symlinked dir
+			wantErrSubstr: "outside allowed roots",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResolvePath(tc.base, canonRoots, tc.input, "")
+
+			if tc.wantErrSubstr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil (got=%q)", tc.wantErrSubstr, got)
+				}
+				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ResolvePath unexpected error: %v", err)
+			}
+
+			st, err := os.Lstat(got)
+			if err != nil {
+				t.Fatalf("Lstat(%q): %v", got, err)
+			}
+			isLink := (st.Mode() & os.ModeSymlink) != 0
+			if isLink != tc.wantSymlink {
+				t.Fatalf("symlink=%v want=%v (mode=%v path=%q)", isLink, tc.wantSymlink, st.Mode(), got)
+			}
+		})
+	}
+}
+
+func mustWriteFileBytes(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 	cwd, err := os.Getwd()
