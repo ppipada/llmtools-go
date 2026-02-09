@@ -17,6 +17,29 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+// ExecutionPolicy provides policy / hardening knobs (host-configured).
+// All limits are clamped to executil hard maximums.
+type ExecutionPolicy struct {
+	// If true, skip heuristic checks (fork-bomb/backgrounding).
+	// NOTE: hard-blocked commands are ALWAYS blocked.
+	AllowDangerous bool
+
+	Timeout          time.Duration
+	MaxOutputBytes   int64
+	MaxCommands      int
+	MaxCommandLength int
+}
+
+func DefaultExecutionPolicy() ExecutionPolicy {
+	return ExecutionPolicy{
+		AllowDangerous:   false,
+		Timeout:          executil.DefaultTimeout,
+		MaxOutputBytes:   executil.DefaultMaxOutputBytes,
+		MaxCommands:      executil.DefaultMaxCommands,
+		MaxCommandLength: executil.DefaultMaxCommandLength,
+	}
+}
+
 // ExecTool is an instance-owned execution tool runner (modeled after fstool.FSTool).
 // It centralizes:
 //   - workBaseDir: base for resolving relative paths
@@ -104,7 +127,11 @@ func WithMaxSessions(maxSessions int) ExecToolOption {
 
 func WithRunScriptPolicy(p RunScriptPolicy) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.runScriptPolicy = p
+		norm, err := NormalizeRunScriptPolicy(p)
+		if err != nil {
+			return err
+		}
+		et.runScriptPolicy = norm
 		return nil
 	}
 }
@@ -115,8 +142,8 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 		workBaseDir:     "",
 		blockedCommands: maps.Clone(executil.HardBlockedCommands),
 
-		execPolicy:      DefaultExecutionPolicy,
-		runScriptPolicy: DefaultRunScriptPolicy,
+		execPolicy:      DefaultExecutionPolicy(),
+		runScriptPolicy: DefaultRunScriptPolicy(),
 
 		sessions: executil.NewSessionStore(),
 	}
@@ -135,6 +162,13 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 	}
 	et.workBaseDir = eff
 	et.allowedRoots = roots
+
+	// Final defensive normalization (covers defaults and any options that didn't normalize).
+	et.runScriptPolicy, err = NormalizeRunScriptPolicy(et.runScriptPolicy)
+	if err != nil {
+		return nil, err
+	}
+
 	return et, nil
 }
 

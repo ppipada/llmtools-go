@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
@@ -128,7 +129,7 @@ type RunScriptPolicy struct {
 	MaxArgBytes int
 }
 
-var DefaultRunScriptPolicy = func() RunScriptPolicy {
+func DefaultRunScriptPolicy() RunScriptPolicy {
 	pyCmd := "python3"
 	pyShell := ShellNameSh
 	if runtime.GOOS == toolutil.GOOSWindows {
@@ -155,7 +156,77 @@ var DefaultRunScriptPolicy = func() RunScriptPolicy {
 		MaxArgs:         256,
 		MaxArgBytes:     16 * 1024,
 	}
-}()
+}
+
+// NormalizeRunScriptPolicy deep-clones and normalizes a RunScriptPolicy.
+// This is defensive: it prevents shared map/slice backing storage and makes
+// policy behavior deterministic (lowercased extensions, leading dots, etc).
+func NormalizeRunScriptPolicy(in RunScriptPolicy) (RunScriptPolicy, error) {
+	out := in
+
+	// Normalize numeric limits.
+	if out.MaxArgs < 0 {
+		return RunScriptPolicy{}, errors.New("runscript policy: MaxArgs must be >= 0")
+	}
+	if out.MaxArgBytes < 0 {
+		return RunScriptPolicy{}, errors.New("runscript policy: MaxArgBytes must be >= 0")
+	}
+
+	// AllowedExtensions: clone + normalize + stable-dedup (preserve order).
+	if out.AllowedExtensions != nil {
+		seen := map[string]struct{}{}
+		norm := make([]string, 0, len(out.AllowedExtensions))
+		for _, e := range out.AllowedExtensions {
+			x := strings.ToLower(strings.TrimSpace(e))
+			if strings.ContainsRune(x, '\x00') {
+				return RunScriptPolicy{}, errors.New("runscript policy: AllowedExtensions contains NUL byte")
+			}
+			if x != "" && !strings.HasPrefix(x, ".") {
+				x = "." + x
+			}
+			if _, ok := seen[x]; ok {
+				continue
+			}
+			seen[x] = struct{}{}
+			norm = append(norm, x)
+		}
+		out.AllowedExtensions = norm
+	}
+
+	// InterpreterByExtension: deep clone + normalize keys.
+	if out.InterpreterByExtension != nil {
+		m := make(map[string]RunScriptInterpreter, len(out.InterpreterByExtension))
+		for k, v := range out.InterpreterByExtension {
+			key := strings.ToLower(strings.TrimSpace(k))
+			if strings.ContainsRune(key, '\x00') {
+				return RunScriptPolicy{}, errors.New("runscript policy: InterpreterByExtension key contains NUL byte")
+			}
+			if key != "" && !strings.HasPrefix(key, ".") {
+				key = "." + key
+			}
+
+			// Defensive clone of args slice (RunScriptInterpreter contains []string).
+			v.Args = slices.Clone(v.Args)
+
+			// Validate mapping is internally consistent.
+			switch v.Mode {
+			case RunScriptModeDirect, RunScriptModeShell, RunScriptModeInterpreter:
+			default:
+				return RunScriptPolicy{}, fmt.Errorf("runscript policy: invalid mode for %q: %q", key, v.Mode)
+			}
+			if v.Mode == RunScriptModeInterpreter && strings.TrimSpace(v.Command) == "" {
+				return RunScriptPolicy{}, fmt.Errorf(
+					"runscript policy: interpreter mapping for %q has empty Command",
+					key,
+				)
+			}
+			m[key] = v
+		}
+		out.InterpreterByExtension = m
+	}
+
+	return out, nil
+}
 
 func runScript(
 	ctx context.Context,
@@ -300,6 +371,16 @@ func runScript(
 
 	timeout := effectiveTimeout(execPol)
 	maxOut := effectiveMaxOutputBytes(execPol)
+	maxCmdLen := effectiveMaxCommandLength(execPol)
+
+	// Defense-in-depth: bound constructed command length (similar to shellcommand).
+	if maxCmdLen > 0 && (len(cmdStrExec) > maxCmdLen || len(cmdStrCheck) > maxCmdLen) {
+		return nil, fmt.Errorf(
+			"constructed command too long (%d bytes; max %d)",
+			max(len(cmdStrExec), len(cmdStrCheck)),
+			maxCmdLen,
+		)
+	}
 
 	// Merge env like shellcommand does (process env + overrides), but no session.
 	env, err := executil.EffectiveEnv(args.Env)

@@ -104,27 +104,6 @@ type ShellCommandResponse struct {
 	Results   []ShellCommandExecResult `json:"results,omitempty"`
 }
 
-// ExecutionPolicy provides policy / hardening knobs (host-configured).
-// All limits are clamped to executil hard maximums.
-type ExecutionPolicy struct {
-	// If true, skip heuristic checks (fork-bomb/backgrounding).
-	// NOTE: hard-blocked commands are ALWAYS blocked.
-	AllowDangerous bool
-
-	Timeout          time.Duration
-	MaxOutputBytes   int64
-	MaxCommands      int
-	MaxCommandLength int
-}
-
-var DefaultExecutionPolicy = ExecutionPolicy{
-	AllowDangerous:   false,
-	Timeout:          executil.DefaultTimeout,
-	MaxOutputBytes:   executil.DefaultMaxOutputBytes,
-	MaxCommands:      executil.DefaultMaxCommands,
-	MaxCommandLength: executil.DefaultMaxCommandLength,
-}
-
 func shellCommand(
 	ctx context.Context,
 	args ShellCommandArgs,

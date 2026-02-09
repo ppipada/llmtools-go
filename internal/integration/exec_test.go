@@ -109,7 +109,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 	// Make runscript robust on Windows by forcing .ps1 to run with ExecutionPolicy Bypass.
 	var execOpts []exectool.ExecToolOption
 	if runtime.GOOS == toolutil.GOOSWindows {
-		pol := exectool.DefaultRunScriptPolicy
+		pol := exectool.DefaultRunScriptPolicy()
 		if pol.InterpreterByExtension == nil {
 			pol.InterpreterByExtension = map[string]exectool.RunScriptInterpreter{}
 		}

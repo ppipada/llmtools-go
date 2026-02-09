@@ -274,7 +274,7 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 				}),
 			},
 			args:        RunScriptArgs{Path: scriptPath},
-			wantErrSubs: []string{"invalid interpreter mode"},
+			wantErrSubs: []string{"invalid mode"},
 		},
 		{
 			name: "interpreter_mode_requires_command",
@@ -372,6 +372,15 @@ func TestRunScript_ValidationsAndResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			et, err := NewExecTool(tc.opts...)
 			if err != nil {
+				if len(tc.wantErrSubs) > 0 {
+					low := strings.ToLower(err.Error())
+					for _, sub := range tc.wantErrSubs {
+						if !strings.Contains(low, strings.ToLower(sub)) {
+							t.Fatalf("error %q does not contain %q", err.Error(), sub)
+						}
+					}
+					return
+				}
 				t.Fatalf("NewExecTool: %v", err)
 			}
 

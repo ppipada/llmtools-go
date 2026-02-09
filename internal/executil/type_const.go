@@ -17,6 +17,11 @@ const (
 
 	defaultSessionTTL  = 30 * time.Minute
 	defaultMaxSessions = 256
+
+	hardMaxEnvVars       = 256
+	hardMaxEnvKeyBytes   = 256
+	hardMaxEnvValueBytes = 32 * 1024
+	hardMaxEnvTotalBytes = 256 * 1024
 )
 
 type ShellName string

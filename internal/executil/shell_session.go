@@ -49,6 +49,10 @@ func (sess *ShellSession) AddToEnv(additionalEnv map[string]string) error {
 		return nil
 	}
 
+	if err := ValidateEnvMap(additionalEnv); err != nil {
+		return err
+	}
+
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	if sess.closed {
@@ -189,9 +193,17 @@ func (sess *ShellSession) GetEffectiveWorkdir(
 }
 
 func ValidateEnvMap(m map[string]string) error {
+	if len(m) > hardMaxEnvVars {
+		return fmt.Errorf("too many env vars: %d (max %d)", len(m), hardMaxEnvVars)
+	}
+	total := 0
 	for k, v := range m {
 		if err := validateEnvKV(k, v); err != nil {
 			return fmt.Errorf("env %q: %w", k, err)
+		}
+		total += len(k) + len(v)
+		if total > hardMaxEnvTotalBytes {
+			return fmt.Errorf("env overrides too large (max %d bytes)", hardMaxEnvTotalBytes)
 		}
 	}
 	return nil
@@ -202,6 +214,13 @@ func validateEnvKV(k, v string) error {
 	if kk == "" {
 		return errors.New("empty name")
 	}
+	if len(kk) > hardMaxEnvKeyBytes {
+		return fmt.Errorf("name too long (%d bytes; max %d)", len(kk), hardMaxEnvKeyBytes)
+	}
+	if len(v) > hardMaxEnvValueBytes {
+		return fmt.Errorf("value too long (%d bytes; max %d)", len(v), hardMaxEnvValueBytes)
+	}
+
 	if strings.ContainsRune(kk, '\x00') || strings.ContainsRune(v, '\x00') {
 		return errors.New("contains NUL byte")
 	}

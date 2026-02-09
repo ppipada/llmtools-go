@@ -276,7 +276,7 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sleep/timeout expectations")
 	}
-	p := DefaultExecutionPolicy
+	p := DefaultExecutionPolicy()
 	p.Timeout = 150 * time.Millisecond
 	st := newTestShellTool(t, WithExecutionPolicy(p))
 
@@ -307,7 +307,7 @@ func TestShellCommand_MaxOutput_Truncates(t *testing.T) {
 	if runtime.GOOS == toolutil.GOOSWindows {
 		t.Skip("unix-specific sh loop expectations")
 	}
-	p := DefaultExecutionPolicy
+	p := DefaultExecutionPolicy()
 	p.MaxOutputBytes = 1024
 	st := newTestShellTool(t, WithExecutionPolicy(p))
 
@@ -596,7 +596,7 @@ func TestShellCommand_Blocklist_DefaultBlocksRMAndCurl(t *testing.T) {
 }
 
 func TestShellCommand_Blocklist_NotOverridableByAllowDangerous(t *testing.T) {
-	p := DefaultExecutionPolicy
+	p := DefaultExecutionPolicy()
 	p.AllowDangerous = true
 	st := newTestShellTool(t, WithExecutionPolicy(p))
 
