@@ -119,15 +119,18 @@ func newHarness(t *testing.T, base string, execOpts ...exectool.ExecToolOption) 
 	return &harness{t: t, base: base, r: r}
 }
 
-func funcIDBySlug(t *testing.T, r *llmtools.Registry, slug string) spec.FuncID {
+func callJSON[T any](t *testing.T, r *llmtools.Registry, slug string, args any) T {
 	t.Helper()
-	for _, tool := range r.Tools() {
-		if tool.Slug == slug {
-			return tool.GoImpl.FuncID
-		}
+
+	rawOut := callRaw(t, r, slug, args)
+	if len(rawOut) != 1 || rawOut[0].Kind != spec.ToolStoreOutputKindText || rawOut[0].TextItem == nil {
+		t.Fatalf("expected single text output for %s, got: %+v", slug, rawOut)
 	}
-	t.Fatalf("tool slug not registered: %q", slug)
-	return ""
+	var decoded T
+	if err := json.Unmarshal([]byte(rawOut[0].TextItem.Text), &decoded); err != nil {
+		t.Fatalf("unmarshal %s output JSON: %v\nraw=%s", slug, err, rawOut[0].TextItem.Text)
+	}
+	return decoded
 }
 
 func callRaw(t *testing.T, r *llmtools.Registry, slug string, args any) []spec.ToolStoreOutputUnion {
@@ -145,18 +148,15 @@ func callRaw(t *testing.T, r *llmtools.Registry, slug string, args any) []spec.T
 	return out
 }
 
-func callJSON[T any](t *testing.T, r *llmtools.Registry, slug string, args any) T {
+func funcIDBySlug(t *testing.T, r *llmtools.Registry, slug string) spec.FuncID {
 	t.Helper()
-
-	rawOut := callRaw(t, r, slug, args)
-	if len(rawOut) != 1 || rawOut[0].Kind != spec.ToolStoreOutputKindText || rawOut[0].TextItem == nil {
-		t.Fatalf("expected single text output for %s, got: %+v", slug, rawOut)
+	for _, tool := range r.Tools() {
+		if tool.Slug == slug {
+			return tool.GoImpl.FuncID
+		}
 	}
-	var decoded T
-	if err := json.Unmarshal([]byte(rawOut[0].TextItem.Text), &decoded); err != nil {
-		t.Fatalf("unmarshal %s output JSON: %v\nraw=%s", slug, err, rawOut[0].TextItem.Text)
-	}
-	return decoded
+	t.Fatalf("tool slug not registered: %q", slug)
+	return ""
 }
 
 func requireSingleTextOutput(t *testing.T, out []spec.ToolStoreOutputUnion) string {

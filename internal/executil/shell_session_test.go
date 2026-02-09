@@ -230,21 +230,6 @@ func TestEffectiveEnv_NilReceiver_WorksAndAppliesOverrides(t *testing.T) {
 	}
 }
 
-func mustSameDir(t *testing.T, a, b string) {
-	t.Helper()
-	sa, err := os.Stat(a)
-	if err != nil {
-		t.Fatalf("stat(%q): %v", a, err)
-	}
-	sb, err := os.Stat(b)
-	if err != nil {
-		t.Fatalf("stat(%q): %v", b, err)
-	}
-	if !os.SameFile(sa, sb) {
-		t.Fatalf("expected same dir:\n  a=%q\n  b=%q", a, b)
-	}
-}
-
 func TestShellSession_GetEffectiveWorkdir_RejectsInvalidSession(t *testing.T) {
 	td := t.TempDir()
 
@@ -300,5 +285,20 @@ func TestShellSession_GetEffectiveWorkdir_DefaultsToCWDWhenAllEmpty(t *testing.T
 			// SameFile works even if got is absolute/canonicalized.
 			mustSameDir(t, filepath.Clean(cwd), got)
 		})
+	}
+}
+
+func mustSameDir(t *testing.T, a, b string) {
+	t.Helper()
+	sa, err := os.Stat(a)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", a, err)
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		t.Fatalf("stat(%q): %v", b, err)
+	}
+	if !os.SameFile(sa, sb) {
+		t.Fatalf("expected same dir:\n  a=%q\n  b=%q", a, b)
 	}
 }
