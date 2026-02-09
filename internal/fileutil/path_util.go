@@ -104,7 +104,7 @@ func ResolvePath(workBaseDir string, allowedRoots []string, inputPath, defaultIf
 	abs = ApplyDarwinSystemRootAliases(abs)
 
 	if err := EnsurePathWithinAllowedRoots(abs, allowedRoots); err != nil {
-		return "", fmt.Errorf("path %q is outside allowed roots", abs)
+		return "", fmt.Errorf("path %q is outside allowed roots %q", abs, allowedRoots)
 	}
 	return abs, nil
 }
