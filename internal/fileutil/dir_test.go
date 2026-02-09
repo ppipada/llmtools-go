@@ -367,7 +367,15 @@ func TestGetEffectiveWorkDir_EnforcesRootsAndExistence(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := GetEffectiveWorkDir(tc.input, tc.roots)
+			roots := tc.roots
+			var err error
+			if len(tc.roots) != 0 {
+				roots, err = CanonicalizeAllowedRoots(roots)
+				if err != nil {
+					t.Fatalf("could not CanonicalizeAllowedRoots")
+				}
+			}
+			got, err := GetEffectiveWorkDir(tc.input, roots)
 			if tc.wantErrSubstr != "" {
 				if err == nil {
 					t.Fatalf("expected error")

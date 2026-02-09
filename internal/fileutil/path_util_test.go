@@ -483,7 +483,16 @@ func TestResolvePath_RelativeAbsoluteAllowedRootsAndDefaults(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolvePath(tc.base, tc.roots, tc.input, tc.def)
+			roots := tc.roots
+			var err error
+			if len(tc.roots) != 0 {
+				roots, err = CanonicalizeAllowedRoots(roots)
+				if err != nil {
+					t.Fatalf("could not CanonicalizeAllowedRoots")
+				}
+			}
+
+			got, err := ResolvePath(tc.base, roots, tc.input, tc.def)
 			if tc.wantErrSubstr != "" {
 				if err == nil {
 					t.Fatalf("expected error")
