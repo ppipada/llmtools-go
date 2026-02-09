@@ -114,7 +114,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			pol.InterpreterByExtension = map[string]exectool.RunScriptInterpreter{}
 		}
 		pol.InterpreterByExtension[".ps1"] = exectool.RunScriptInterpreter{
-			Shell:   exectool.ShellNameCmd,
+			Shell:   exectool.ShellNamePwsh,
 			Mode:    exectool.RunScriptModeInterpreter,
 			Command: "powershell",
 			Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File"},
