@@ -7,9 +7,8 @@
 
 Go-native and cross-platform "tool" implementations for common local tasks, plus a small registry that makes them easy to expose to LLM tool-calling systems.
 
-## Table of contents
+## Table of contents <!-- omit in toc -->
 
-- [Table of contents](#table-of-contents)
 - [Features at a glance](#features-at-a-glance)
   - [File system tools](#file-system-tools)
   - [Execute tools](#execute-tools)
