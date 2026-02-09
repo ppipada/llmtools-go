@@ -32,7 +32,7 @@ func ListDirectoryNormalized(dir, pattern string) ([]string, error) {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read dir error %w", err)
 	}
 
 	out := make([]string, 0, len(entries))
@@ -120,9 +120,8 @@ func canonicalWorkdir(p string) (string, error) {
 	// (e.g. macOS /var -> /private/var) and to harden allowed-root checks.
 	// If resolution fails (odd FS / permissions), keep the absolute path.
 	abs = ApplyDarwinSystemRootAliases(abs)
-	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil && resolved != "" {
-		abs = resolved
-	}
+	abs = evalSymlinksBestEffort(abs)
+
 	return abs, nil
 }
 

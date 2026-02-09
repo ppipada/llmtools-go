@@ -3,6 +3,7 @@ package fileutil
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,7 +87,7 @@ func TestListDirectory(t *testing.T) {
 				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
 					t.Fatalf("error=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
 				}
-				if tc.wantIsNotExist && !os.IsNotExist(err) {
+				if tc.wantIsNotExist && !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("error=%v; want os.IsNotExist=true", err)
 				}
 				return
@@ -189,7 +190,7 @@ func TestListDirectory_Additional(t *testing.T) {
 				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
 				}
-				if tc.errIsNotExist && !os.IsNotExist(err) {
+				if tc.errIsNotExist && !errors.Is(err, fs.ErrNotExist) {
 					t.Fatalf("expected not-exist error, got: %v", err)
 				}
 				return
@@ -266,7 +267,7 @@ func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
 		wantErrSubstr string
 	}{
 		{name: "empty_dir_invalid", dir: "   ", wantErrSubstr: "invalid"},
-		{name: "nonexistent_dir_errors", dir: filepath.Join(td, "nope"), wantErrSubstr: "no such"},
+		{name: "nonexistent_dir_errors", dir: filepath.Join(td, "nope"), wantErrSubstr: "read dir error"},
 		{name: "no_pattern_lists_all_sorted", dir: td, pattern: "", want: []string{"a.txt", "b.txt", "dir1"}},
 		{name: "pattern_filters", dir: td, pattern: "*.txt", want: []string{"a.txt", "b.txt"}},
 		{name: "invalid_glob_errors", dir: td, pattern: "[", wantErrSubstr: "syntax"},

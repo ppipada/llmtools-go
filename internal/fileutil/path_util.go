@@ -94,19 +94,25 @@ func ResolvePath(workBaseDir string, allowedRoots []string, inputPath, defaultIf
 		norm = filepath.Join(workBaseDir, norm)
 	}
 
-	abs, err := filepath.Abs(norm)
+	absLex, err := filepath.Abs(norm)
 	if err != nil {
 		return "", err
 	}
-	abs = filepath.Clean(abs)
+	absLex = filepath.Clean(absLex)
 
 	// Keep macOS paths coherent with CanonicalizeAllowedRoots/GetEffectiveWorkDir behavior.
-	abs = ApplyDarwinSystemRootAliases(abs)
+	absLex = ApplyDarwinSystemRootAliases(absLex)
 
-	if err := EnsurePathWithinAllowedRoots(abs, allowedRoots); err != nil {
-		return "", fmt.Errorf("path %q is outside allowed roots %q", abs, allowedRoots)
+	// Canonicalize ONLY for allowed-root comparison (fixes Windows short/long names,
+	// resolves symlinks/junctions to prevent allowed-root bypass).
+	absCheck := evalSymlinksBestEffort(absLex)
+
+	if err := EnsurePathWithinAllowedRoots(absCheck, allowedRoots); err != nil {
+		return "", fmt.Errorf("path %q (resolved to %q) is outside allowed roots %q", absLex, absCheck, allowedRoots)
 	}
-	return abs, nil
+	// Return the lexical path so callers that do Lstat-based checks can still
+	// detect and reject symlink inputs.
+	return absLex, nil
 }
 
 // EnsureDirNoSymlink creates missing directories one component at a time,
@@ -261,6 +267,44 @@ func NormalizePath(p string) (string, error) {
 	}
 	p = filepath.FromSlash(p)
 	return filepath.Clean(p), nil
+}
+
+// evalSymlinksBestEffort tries filepath.EvalSymlinks on p. If p doesn't exist,
+// it walks up to the nearest existing parent, resolves that, then joins the
+// remainder back on.
+//
+// This is important on Windows where the same directory can be spelled using
+// 8.3 short names (e.g. RUNNER~1) or long names (runneradmin).
+func evalSymlinksBestEffort(p string) string {
+	p = filepath.Clean(p)
+	tried := p
+	remainder := ""
+
+	for range 64 {
+		if resolved, err := filepath.EvalSymlinks(tried); err == nil && resolved != "" {
+			resolved = filepath.Clean(resolved)
+			if remainder == "" {
+				return resolved
+			}
+			return filepath.Join(resolved, remainder)
+		}
+
+		parent := filepath.Dir(tried)
+		if parent == tried {
+			// Reached filesystem root (or couldn't make progress).
+			return p
+		}
+
+		base := filepath.Base(tried)
+		if remainder == "" {
+			remainder = base
+		} else {
+			remainder = filepath.Join(base, remainder)
+		}
+		tried = parent
+	}
+	// Attempts exhausted.
+	return p
 }
 
 func randomHex(nBytes int) (string, error) {
