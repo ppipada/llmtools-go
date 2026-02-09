@@ -18,7 +18,7 @@ Go-native and cross-platform "tool" implementations for common local tasks, plus
 - [Package overview](#package-overview)
 - [Registry](#registry)
 - [Tool outputs](#tool-outputs)
-- [Sandboxing \& path policy](#sandboxing--path-policy)
+- [Sandboxing and path policy](#sandboxing-and-path-policy)
 - [Examples](#examples)
 - [Shell / exec tool notes](#shell--exec-tool-notes)
 - [Development](#development)
@@ -121,7 +121,7 @@ The registry provides:
     - `file` output for all other binaries when `encoding=binary`
     - E.g.: `readfile`: This output makes `readfile` suitable for LLM systems that support multi-modal/file outputs.
 
-## Sandboxing & path policy
+## Sandboxing and path policy
 
 All `Tools` are are _instance-owned_ tools. Hosts can configure:
 
