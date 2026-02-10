@@ -191,7 +191,6 @@ func TestSessionStore_ConcurrentAccess_NoDeadlocks(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(tc.workers)
 			for w := 0; w < tc.workers; w++ {
-				w := w
 				go func() {
 					defer wg.Done()
 					for i := 0; i < tc.iters; i++ {

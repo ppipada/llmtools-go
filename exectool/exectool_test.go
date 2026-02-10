@@ -313,7 +313,6 @@ func TestExecTool_ConcurrentGetSet_NoPanics(t *testing.T) {
 			wg.Add(tc.workers)
 
 			for w := 0; w < tc.workers; w++ {
-				w := w
 				go func() {
 					defer wg.Done()
 					for i := 0; i < tc.iters; i++ {
