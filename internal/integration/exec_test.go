@@ -144,7 +144,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			Path:    "hello.ps1",
 			Args:    []string{"world"},
 			Env:     map[string]string{"MYVAR": "hello"},
-			Workdir: scriptsDirRel,
+			WorkDir: scriptsDirRel,
 		})
 		if res.ExitCode != 0 {
 			t.Fatalf("runscript exit != 0: %s", debugJSON(t, res))
@@ -169,7 +169,7 @@ func TestE2E_Exec_RunScript(t *testing.T) {
 			Path:    "hello.sh",
 			Args:    []string{"world"},
 			Env:     map[string]string{"MYVAR": "hello"},
-			Workdir: scriptsDirRel,
+			WorkDir: scriptsDirRel,
 		})
 		if res.ExitCode != 0 {
 			t.Fatalf("runscript exit != 0: %s", debugJSON(t, res))

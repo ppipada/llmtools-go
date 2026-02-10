@@ -27,7 +27,7 @@ var shellCommandToolSpec = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Shell Command",
 	Description:   "Execute local shell commands (cross-platform). Supports session-like persistence for workdir/env.",
-	Tags:          []string{"exec", "shell"},
+	Tags:          []string{"exec"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -38,7 +38,7 @@ var shellCommandToolSpec = spec.Tool{
 		"items": { "type": "string" },
 		"description": "List of commands to execute sequentially. Prefer setting workdir rather than using 'cd'."
 	},
-	"workdir": {
+	"workDir": {
 		"type": "string",
 		"description": "Working directory to execute in. If omitted and sessionID is used, uses the session workdir; otherwise uses tools workBaseDir."
 	},
@@ -89,7 +89,7 @@ const (
 
 type ShellCommandArgs struct {
 	Commands        []string          `json:"commands,omitempty"`
-	Workdir         string            `json:"workdir,omitempty"`
+	WorkDir         string            `json:"workDir,omitempty"`
 	Env             map[string]string `json:"env,omitempty"`
 	Shell           ShellName         `json:"shell,omitempty"`
 	ExecuteParallel bool              `json:"executeParallel,omitempty"`
@@ -100,7 +100,7 @@ type ShellCommandExecResult = executil.ShellCommandExecResult
 
 type ShellCommandOut struct {
 	SessionID string                   `json:"sessionID,omitempty"`
-	Workdir   string                   `json:"workdir,omitempty"`
+	WorkDir   string                   `json:"workDir,omitempty"`
 	Results   []ShellCommandExecResult `json:"results,omitempty"`
 }
 
@@ -162,10 +162,10 @@ func shellCommand(
 	// "executeParallel=true" => treat commands as independent => do not stop on error.
 	stopOnError := !args.ExecuteParallel
 
-	// Resolve args.Workdir relative to workBaseDir (fstool-consistent).
+	// Resolve args.WorkDir relative to workBaseDir (fstool-consistent).
 	inputWorkDirAbs := ""
-	if strings.TrimSpace(args.Workdir) != "" && strings.TrimSpace(args.Workdir) != "." {
-		p, rerr := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Workdir, "")
+	if strings.TrimSpace(args.WorkDir) != "" && strings.TrimSpace(args.WorkDir) != "." {
+		p, rerr := fileutil.ResolvePath(workBaseDir, allowedRoots, args.WorkDir, "")
 		if rerr != nil {
 			return nil, rerr
 		}
@@ -202,7 +202,7 @@ func shellCommand(
 	}
 
 	// Persist session defaults if caller provided values.
-	if strings.TrimSpace(args.Workdir) != "" {
+	if strings.TrimSpace(args.WorkDir) != "" {
 		sess.SetWorkDir(workdir)
 	}
 	if err := sess.AddToEnv(args.Env); err != nil {
@@ -242,7 +242,7 @@ func shellCommand(
 			// Return structured output when possible.
 			res = ShellCommandExecResult{
 				Command:   command,
-				Workdir:   workdir,
+				WorkDir:   workdir,
 				Shell:     sel.Name,
 				ShellPath: sel.Path,
 
@@ -261,7 +261,7 @@ func shellCommand(
 
 	resp := ShellCommandOut{
 		SessionID: args.SessionID,
-		Workdir:   workdir,
+		WorkDir:   workdir,
 		Results:   results,
 	}
 	return &resp, nil

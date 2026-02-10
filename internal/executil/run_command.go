@@ -77,7 +77,7 @@ func RunOneShellCommand(
 
 	return ShellCommandExecResult{
 		Command:   command,
-		Workdir:   workdir,
+		WorkDir:   workdir,
 		Shell:     sel.Name,
 		ShellPath: sel.Path,
 

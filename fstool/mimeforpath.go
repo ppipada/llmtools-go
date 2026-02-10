@@ -53,7 +53,7 @@ type MIMEForPathOut struct {
 	Extension           string           `json:"extension,omitempty"`
 	NormalizedExtension string           `json:"normalizedExtension,omitempty"`
 	MIMEType            string           `json:"mimeType"`
-	BaseMIMEType        string           `json:"baseMimeType"`
+	BaseMIMEType        string           `json:"baseMIMEType"`
 	Mode                MIMEMode         `json:"mode"`
 	Method              MIMEDetectMethod `json:"method"`
 }

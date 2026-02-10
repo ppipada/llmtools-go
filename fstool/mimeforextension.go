@@ -55,7 +55,7 @@ type MIMEForExtensionOut struct {
 	Extension           string   `json:"extension"`
 	NormalizedExtension string   `json:"normalizedExtension"`
 	MIMEType            string   `json:"mimeType"`
-	BaseMIMEType        string   `json:"baseMimeType"`
+	BaseMIMEType        string   `json:"baseMIMEType"`
 	Mode                MIMEMode `json:"mode"`
 	Known               bool     `json:"known"`
 }

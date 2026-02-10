@@ -36,7 +36,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		},
 		{
 			name:          "workdir_does_not_exist",
-			args:          ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: nonexistent},
+			args:          ShellCommandArgs{Commands: []string{"echo hi"}, WorkDir: nonexistent},
 			wantErrSubstr: "no such dir",
 		},
 		{
@@ -59,7 +59,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		{
 			name: "workdir_outside_allowed_roots",
 			opts: []ExecToolOption{WithAllowedRoots([]string{td})},
-			args: ShellCommandArgs{Commands: []string{"echo hi"}, Workdir: outside},
+			args: ShellCommandArgs{Commands: []string{"echo hi"}, WorkDir: outside},
 
 			wantErrSubstr: "outside allowed roots",
 		},
@@ -284,7 +284,7 @@ func TestShellCommand_Timeout_SetsTimedOutAnd124(t *testing.T) {
 		Shell:     ShellNameSh,
 		Commands:  []string{`sleep 2`},
 		SessionID: "",
-		Workdir:   "",
+		WorkDir:   "",
 		Env:       nil,
 	})
 	if err != nil {
@@ -474,7 +474,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	// 1) Create session, set workdir and env, and run "pwd".
 	out, err := st.ShellCommand(t.Context(), ShellCommandArgs{
 		Shell:    ShellNameSh,
-		Workdir:  td,
+		WorkDir:  td,
 		Env:      map[string]string{"FOO": "bar"},
 		Commands: []string{"pwd"},
 	})
@@ -486,7 +486,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if resp.SessionID == "" {
 		t.Fatalf("expected sessionID returned")
 	}
-	mustSameDir(t, td, resp.Workdir)
+	mustSameDir(t, td, resp.WorkDir)
 	if len(resp.Results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(resp.Results))
 	}
@@ -508,7 +508,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 	if resp.Results[0].Stdout != "bar" {
 		t.Fatalf("expected FOO=bar, got %q (stderr=%q)", resp.Results[0].Stdout, resp.Results[0].Stderr)
 	}
-	mustSameDir(t, td, resp.Workdir)
+	mustSameDir(t, td, resp.WorkDir)
 
 	// 3) Update session env by providing Env; should persist for subsequent calls.
 	out, err = st.ShellCommand(t.Context(), ShellCommandArgs{
@@ -551,7 +551,7 @@ func TestShellCommand_Session_PersistsWorkdirAndEnv_UpdateRestartClose(t *testin
 		t.Fatalf("ShellCommand(new session) error: %v", err)
 	}
 	resp = out
-	mustSameDir(t, cwd, resp.Workdir)
+	mustSameDir(t, cwd, resp.WorkDir)
 
 	// After restart, FOO should be empty (unless inherited from process env; to avoid flake,
 	// assert only that it is not "baz").

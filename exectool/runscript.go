@@ -24,7 +24,7 @@ var runScriptToolSpec = spec.Tool{
 	Version:       "v1.0.0",
 	DisplayName:   "Run Script",
 	Description:   "Run a pre-existing script from disk.",
-	Tags:          []string{"exec", "script"},
+	Tags:          []string{"exec"},
 
 	ArgSchema: spec.JSONSchema(`{
 "$schema": "http://json-schema.org/draft-07/schema#",
@@ -44,7 +44,7 @@ var runScriptToolSpec = spec.Tool{
 		"additionalProperties": { "type": "string" },
 		"description": "Environment variable overrides (merged into the process env)."
 	},
-	"workdir": {
+	"workDir": {
 		"type": "string",
 		"description": "Working directory. Can be absolute or relative to workBaseDir."
 	}
@@ -62,19 +62,19 @@ type RunScriptArgs struct {
 	Path    string            `json:"path"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
-	Workdir string            `json:"workdir,omitempty"`
+	WorkDir string            `json:"workDir,omitempty"`
 }
 
 type RunScriptOut struct {
 	Path       string `json:"path"`
-	ExitCode   int    `json:"exit_code"`
+	ExitCode   int    `json:"exitCode"`
 	Stdout     string `json:"stdout,omitempty"`
 	Stderr     string `json:"stderr,omitempty"`
-	TimedOut   bool   `json:"timed_out,omitempty"`
-	DurationMS int64  `json:"duration_ms,omitempty"`
+	TimedOut   bool   `json:"timedOut,omitempty"`
+	DurationMS int64  `json:"durationMS,omitempty"`
 
-	StdoutTruncated bool `json:"stdout_truncated,omitempty"`
-	StderrTruncated bool `json:"stderr_truncated,omitempty"`
+	StdoutTruncated bool `json:"stdoutTruncated,omitempty"`
+	StderrTruncated bool `json:"stderrTruncated,omitempty"`
 }
 
 type RunScriptMode string
@@ -245,8 +245,8 @@ func runScript(
 	if reqPath == "" {
 		return nil, errors.New("path is required")
 	}
-	// Workdir: absolute or relative; default to workBaseDir.
-	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Workdir, workBaseDir)
+	// WorkDir: absolute or relative; default to workBaseDir.
+	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.WorkDir, workBaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func runScript(
 	// - absolute => must still be within allowedRoots (if configured).
 	// If relative and workdir provided, resolve relative to workdir.
 	baseForScript := workBaseDir
-	if strings.TrimSpace(args.Workdir) != "" && !filepath.IsAbs(reqPath) {
+	if strings.TrimSpace(args.WorkDir) != "" && !filepath.IsAbs(reqPath) {
 		baseForScript = workdirAbs
 	}
 	scriptAbs, err := fileutil.ResolvePath(baseForScript, allowedRoots, reqPath, "")

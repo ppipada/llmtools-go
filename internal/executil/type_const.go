@@ -54,7 +54,7 @@ type SelectedShell struct {
 
 type ShellCommandExecResult struct {
 	Command   string    `json:"command"`
-	Workdir   string    `json:"workdir"`
+	WorkDir   string    `json:"workDir"`
 	Shell     ShellName `json:"shell"`
 	ShellPath string    `json:"shellPath"`
 
