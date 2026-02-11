@@ -278,9 +278,18 @@ func MIMEForLocalFile(
 	ext := filepath.Ext(path)
 	if ext != "" {
 		mt, e := MIMEFromExtensionString(ext)
+
 		if e == nil && mt != MIMEEmpty && GetBaseMIME(mt) != string(MIMEApplicationOctetStream) {
-			return mt, GetModeForMIME(mt), MIMEDetectMethodExtension, nil
+			m := GetModeForMIME(mt)
+			// Only trust extension-derived MIME if it yields a useful mode.
+			// Some platforms map unknown text formats to application/x-*, which would otherwise
+			// short-circuit sniffing and incorrectly classify readable text as "default".
+			if m != ExtensionModeDefault {
+				return mt, m, MIMEDetectMethodExtension, nil
+			}
+			// else: fall through to sniff
 		}
+
 		// Unknown or generic => sniff.
 	}
 
@@ -320,7 +329,7 @@ func MIMEFromExtensionString(ext string) (MIMEType, error) {
 
 // SniffFileMIME inspects initial bytes of a file and returns a best-effort
 // MIME type and mode. It will return an error if the file can't be opened/read.
-func SniffFileMIME(path string) (mimeType MIMEType, mode ExtensionMode, err error) {
+func SniffFileMIME(path string) (MIMEType, ExtensionMode, error) {
 	if strings.TrimSpace(path) == "" {
 		return MIMEEmpty, ExtensionModeDefault, ErrInvalidPath
 	}
@@ -339,28 +348,29 @@ func SniffFileMIME(path string) (mimeType MIMEType, mode ExtensionMode, err erro
 
 	sample := buf[:n]
 	if len(sample) == 0 {
-		// Empty file: treat as text.
 		return MIMETextPlain, ExtensionModeText, nil
 	}
 
 	mt := MIMEType(http.DetectContentType(sample))
 	m := GetModeForMIME(mt)
 
-	// If DetectContentType is generic, try to classify text via heuristic.
+	// If DetectContentType gave us a strong signal (text/image/document), trust it.
+	if m != ExtensionModeDefault {
+		return mt, m, nil
+	}
+
+	// Only for "default/unknown" do we apply the text heuristic.
+	if isProbablyTextSample(sample) {
+		return MIMETextPlain, ExtensionModeText, nil
+	}
+
+	// Normalize generic/empty to octet-stream.
 	if GetBaseMIME(mt) == string(MIMEApplicationOctetStream) || mt == MIMEEmpty {
-		if isProbablyTextSample(sample) {
-			return MIMETextPlain, ExtensionModeText, nil
-		}
 		return MIMEApplicationOctetStream, ExtensionModeDefault, nil
 	}
 
-	// If DetectContentType says "text/plain" but the sample is clearly binary,
-	// downgrade to default/octet-stream.
-	if m == ExtensionModeText && !isProbablyTextSample(sample) {
-		return MIMEApplicationOctetStream, ExtensionModeDefault, nil
-	}
-
-	return mt, m, nil
+	// Otherwise return the unknown MIME with default mode.
+	return mt, ExtensionModeDefault, nil
 }
 
 func GetModeForMIME(mt MIMEType) ExtensionMode {
