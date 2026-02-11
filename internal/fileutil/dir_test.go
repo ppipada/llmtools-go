@@ -78,7 +78,23 @@ func TestListDirectory(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t)
 			}
-			got, err := ListDirectory(tc.dir, tc.pattern)
+			dir := tc.dir
+			if dir == "" {
+				dir = "."
+			}
+			var err error
+			dir, err = NormalizePath(dir)
+			if err != nil {
+				if tc.wantErrIs != nil {
+					if !errors.Is(err, tc.wantErrIs) {
+						t.Fatalf("got normalize err (got=%v)", err)
+					}
+				} else {
+					t.Fatalf("got normalize err (got=%v)", err)
+				}
+				return
+			}
+			got, err := ListDirectoryNormalized(dir, tc.pattern)
 
 			if tc.wantErrIs != nil || tc.wantIsNotExist {
 				if err == nil {
@@ -112,8 +128,14 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(tmp, "dir"), 0o755); err != nil {
 		t.Fatalf("failed to mkdir: %v", err)
 	}
+	dir := "."
+	var err error
+	dir, err = NormalizePath(dir)
+	if err != nil {
+		t.Fatalf("got normalize err (got=%v)", err)
+	}
 
-	got, err := ListDirectory("", "")
+	got, err := ListDirectoryNormalized(dir, "")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -181,7 +203,17 @@ func TestListDirectory_Additional(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ListDirectory(tc.dir, tc.pattern)
+			dir := tc.dir
+			if dir == "" {
+				dir = "."
+			}
+			var err error
+			dir, err = NormalizePath(dir)
+			if err != nil {
+				t.Fatalf("got normalization error (got=%v)", err)
+			}
+
+			got, err := ListDirectoryNormalized(dir, tc.pattern)
 
 			if tc.wantErr {
 				if err == nil {

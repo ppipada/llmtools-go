@@ -9,21 +9,6 @@ import (
 	"strings"
 )
 
-// ListDirectory lists files/dirs in path (default "."), pattern is an optional
-// glob filter (filepath.Match).
-func ListDirectory(path, pattern string) ([]string, error) {
-	dir := path
-	if dir == "" {
-		dir = "."
-	}
-	var err error
-	dir, err = NormalizePath(dir)
-	if err != nil {
-		return nil, err
-	}
-	return ListDirectoryNormalized(dir, pattern)
-}
-
 // ListDirectoryNormalized lists entries in a directory that is assumed to be already normalized.
 // It does not normalize or resolve relative paths; callers must do that.
 func ListDirectoryNormalized(dir, pattern string) ([]string, error) {
