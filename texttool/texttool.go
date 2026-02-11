@@ -2,7 +2,6 @@ package texttool
 
 import (
 	"context"
-	"slices"
 	"sync"
 
 	"github.com/flexigpt/llmtools-go/internal/fileutil"
@@ -10,37 +9,75 @@ import (
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
+// textToolPolicy centralizes sandbox/path policy for this tool instance.
+type textToolPolicy struct {
+	allowedRoots  []string
+	workBaseDir   string
+	blockSymlinks bool
+}
+
+// Clone returns an independent copy of the policy.
+func (p *textToolPolicy) Clone() *textToolPolicy {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	cp.allowedRoots = append([]string(nil), p.allowedRoots...)
+	return &cp
+}
+
 // TextTool is an instance-owned text tool runner.
 // It centralizes path resolution and sandbox policy:
 //   - workBaseDir: base for resolving relative paths
 //   - allowedRoots: optional restriction; if empty/nil, allow all
+//   - blockSymlinks: blocks symlink traversal (if enforced downstream).
 type TextTool struct {
-	mu           sync.RWMutex
-	allowedRoots []string
-	workBaseDir  string
+	mu         sync.RWMutex
+	toolPolicy *textToolPolicy
 }
 
 type TextToolOption func(*TextTool) error
 
 func WithAllowedRoots(roots []string) TextToolOption {
 	return func(tt *TextTool) error {
-		tt.allowedRoots = roots
+		if tt.toolPolicy == nil {
+			tt.toolPolicy = &textToolPolicy{}
+		}
+		tt.toolPolicy.allowedRoots = roots
 		return nil
 	}
 }
 
 func WithWorkBaseDir(base string) TextToolOption {
 	return func(tt *TextTool) error {
-		tt.workBaseDir = base
+		if tt.toolPolicy == nil {
+			tt.toolPolicy = &textToolPolicy{}
+		}
+		tt.toolPolicy.workBaseDir = base
+		return nil
+	}
+}
+
+// WithBlockSymlinks configures whether symlink traversal should be blocked (if supported downstream).
+func WithBlockSymlinks(block bool) TextToolOption {
+	return func(tt *TextTool) error {
+		if tt.toolPolicy == nil {
+			tt.toolPolicy = &textToolPolicy{}
+		}
+		tt.toolPolicy.blockSymlinks = block
 		return nil
 	}
 }
 
 func NewTextTool(opts ...TextToolOption) (*TextTool, error) {
 	tt := &TextTool{
-		allowedRoots: nil,
-		workBaseDir:  "",
+		toolPolicy: &textToolPolicy{
+			allowedRoots:  nil,
+			workBaseDir:   "",
+			blockSymlinks: false,
+		},
 	}
+
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -50,72 +87,67 @@ func NewTextTool(opts ...TextToolOption) (*TextTool, error) {
 		}
 	}
 
-	eff, roots, err := fileutil.InitPathPolicy(tt.workBaseDir, tt.allowedRoots)
+	eff, roots, err := fileutil.InitPathPolicy(tt.toolPolicy.workBaseDir, tt.toolPolicy.allowedRoots)
 	if err != nil {
 		return nil, err
 	}
-	tt.workBaseDir = eff
-	tt.allowedRoots = roots
+
+	tt.toolPolicy = &textToolPolicy{
+		allowedRoots:  roots,
+		workBaseDir:   eff,
+		blockSymlinks: tt.toolPolicy.blockSymlinks,
+	}
+
 	return tt, nil
 }
 
-func (tt *TextTool) Tools() []spec.Tool {
-	return []spec.Tool{
-		tt.DeleteTextLinesTool(),
-		tt.FindTextTool(),
-		tt.InsertTextLinesTool(),
-		tt.ReadTextRangeTool(),
-		tt.ReplaceTextLinesTool(),
-	}
-}
-
-func (tt *TextTool) DeleteTextLinesTool() spec.Tool { return toolutil.CloneTool(deleteTextLinesTool) }
-func (tt *TextTool) FindTextTool() spec.Tool        { return toolutil.CloneTool(findTextTool) }
-func (tt *TextTool) InsertTextLinesTool() spec.Tool { return toolutil.CloneTool(insertTextLinesTool) }
-func (tt *TextTool) ReadTextRangeTool() spec.Tool   { return toolutil.CloneTool(readTextRangeTool) }
-func (tt *TextTool) ReplaceTextLinesTool() spec.Tool {
-	return toolutil.CloneTool(replaceTextLinesTool)
-}
+func (tt *TextTool) DeleteTextLinesTool() spec.Tool  { return toolutil.CloneTool(deleteTextLinesTool) }
+func (tt *TextTool) FindTextTool() spec.Tool         { return toolutil.CloneTool(findTextTool) }
+func (tt *TextTool) InsertTextLinesTool() spec.Tool  { return toolutil.CloneTool(insertTextLinesTool) }
+func (tt *TextTool) ReadTextRangeTool() spec.Tool    { return toolutil.CloneTool(readTextRangeTool) }
+func (tt *TextTool) ReplaceTextLinesTool() spec.Tool { return toolutil.CloneTool(replaceTextLinesTool) }
 
 func (tt *TextTool) DeleteTextLines(ctx context.Context, args DeleteTextLinesArgs) (*DeleteTextLinesOut, error) {
 	return toolutil.WithRecoveryResp(func() (*DeleteTextLinesOut, error) {
-		base, roots := tt.snapshotPolicy()
-		return deleteTextLines(ctx, args, base, roots)
+		p := tt.snapshotPolicy()
+		return deleteTextLines(ctx, args, *p)
 	})
 }
 
 func (tt *TextTool) FindText(ctx context.Context, args FindTextArgs) (*FindTextOut, error) {
 	return toolutil.WithRecoveryResp(func() (*FindTextOut, error) {
-		base, roots := tt.snapshotPolicy()
-		return findText(ctx, args, base, roots)
+		p := tt.snapshotPolicy()
+		return findText(ctx, args, *p)
 	})
 }
 
 func (tt *TextTool) InsertTextLines(ctx context.Context, args InsertTextLinesArgs) (*InsertTextLinesOut, error) {
 	return toolutil.WithRecoveryResp(func() (*InsertTextLinesOut, error) {
-		base, roots := tt.snapshotPolicy()
-		return insertTextLines(ctx, args, base, roots)
+		p := tt.snapshotPolicy()
+		return insertTextLines(ctx, args, *p)
 	})
 }
 
 func (tt *TextTool) ReadTextRange(ctx context.Context, args ReadTextRangeArgs) (*ReadTextRangeOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReadTextRangeOut, error) {
-		base, roots := tt.snapshotPolicy()
-		return readTextRange(ctx, args, base, roots)
+		p := tt.snapshotPolicy()
+		return readTextRange(ctx, args, *p)
 	})
 }
 
 func (tt *TextTool) ReplaceTextLines(ctx context.Context, args ReplaceTextLinesArgs) (*ReplaceTextLinesOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReplaceTextLinesOut, error) {
-		base, roots := tt.snapshotPolicy()
-		return replaceTextLines(ctx, args, base, roots)
+		p := tt.snapshotPolicy()
+		return replaceTextLines(ctx, args, *p)
 	})
 }
 
-func (tt *TextTool) snapshotPolicy() (base string, roots []string) {
+func (tt *TextTool) snapshotPolicy() *textToolPolicy {
 	tt.mu.RLock()
-	base = tt.workBaseDir
-	roots = slices.Clone(tt.allowedRoots)
+	p := tt.toolPolicy
 	tt.mu.RUnlock()
-	return base, roots
+	if p == nil {
+		return nil
+	}
+	return p.Clone()
 }

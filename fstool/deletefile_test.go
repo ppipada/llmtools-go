@@ -37,7 +37,11 @@ func TestDeleteFile(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
 
-				_, err := deleteFile(ctx, DeleteFileArgs{Path: p, TrashDir: filepath.Join(tmp, "trash")}, "", nil)
+				_, err := deleteFile(
+					ctx,
+					DeleteFileArgs{Path: p, TrashDir: filepath.Join(tmp, "trash")},
+					fsToolPolicy{},
+				)
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got: %v", err)
 				}
@@ -54,7 +58,7 @@ func TestDeleteFile(t *testing.T) {
 				_, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     filepath.Join(tmp, "missing.txt"),
 					TrashDir: filepath.Join(tmp, "trash"),
-				}, "", nil)
+				}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -71,7 +75,7 @@ func TestDeleteFile(t *testing.T) {
 				_, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     tmp,
 					TrashDir: filepath.Join(tmp, "trash"),
-				}, "", nil)
+				}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -89,7 +93,7 @@ func TestDeleteFile(t *testing.T) {
 				out, err := deleteFile(t.Context(), DeleteFileArgs{
 					Path:     "  " + p + "  ",
 					TrashDir: "  " + trash + "  ",
-				}, "", nil)
+				}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile: %v", err)
 				}
@@ -128,13 +132,13 @@ func TestDeleteFile(t *testing.T) {
 
 				p := filepath.Join(tmp, "same.txt")
 				writeFile(t, p, []byte("one"))
-				out1, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, "", nil)
+				out1, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile #1: %v", err)
 				}
 
 				writeFile(t, p, []byte("two"))
-				out2, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, "", nil)
+				out2, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile #2: %v", err)
 				}
@@ -168,7 +172,7 @@ func TestDeleteFile(t *testing.T) {
 				trashAsFile := filepath.Join(tmp, "trash")
 				writeFile(t, trashAsFile, []byte("not a dir"))
 
-				_, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trashAsFile}, "", nil)
+				_, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trashAsFile}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -194,7 +198,7 @@ func TestDeleteFile(t *testing.T) {
 				p := filepath.Join(tmp, "auto.txt")
 				writeFile(t, p, []byte("x"))
 
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "auto"}, "", nil)
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "auto"}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile(auto): %v", err)
 				}
@@ -255,7 +259,7 @@ func TestDeleteFile(t *testing.T) {
 				p := filepath.Join(tmp, "auto.txt")
 				writeFile(t, p, []byte("x"))
 
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "   "}, "", nil)
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "   "}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile(auto whitespace): %v", err)
 				}
@@ -286,7 +290,7 @@ func TestDeleteFile(t *testing.T) {
 				}
 
 				trash := filepath.Join(tmp, "trash")
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: link, TrashDir: trash}, "", nil)
+				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: link, TrashDir: trash}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("deleteFile: %v", err)
 				}

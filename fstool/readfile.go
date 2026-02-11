@@ -61,12 +61,13 @@ type ReadFileArgs struct {
 func readFile(
 	ctx context.Context,
 	args ReadFileArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp fsToolPolicy,
 ) ([]spec.ToolStoreOutputUnion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	// Normalize and validate encoding.
 	enc := fileutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
 	if enc == "" {

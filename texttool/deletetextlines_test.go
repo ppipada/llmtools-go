@@ -137,7 +137,7 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "del-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := deleteTextLines(t.Context(), args, "", nil)
+			out, err := deleteTextLines(t.Context(), args, textToolPolicy{})
 			mustNoErr(t, err)
 
 			if out.DeletionsMade != tt.wantDeletions {
@@ -294,7 +294,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := deleteTextLines(ctx, args, "", nil)
+			_, err := deleteTextLines(ctx, args, textToolPolicy{})
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

@@ -101,13 +101,13 @@ type InsertTextLinesOut struct {
 func insertTextLines(
 	ctx context.Context,
 	args InsertTextLinesArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp textToolPolicy,
 ) (*InsertTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

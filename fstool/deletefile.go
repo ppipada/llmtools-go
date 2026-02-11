@@ -77,12 +77,13 @@ type trashCandidate struct {
 func deleteFile(
 	ctx context.Context,
 	args DeleteFileArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp fsToolPolicy,
 ) (*DeleteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 
 	src, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {

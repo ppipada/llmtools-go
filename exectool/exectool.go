@@ -3,10 +3,8 @@ package exectool
 import (
 	"context"
 	"maps"
-	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +16,7 @@ import (
 )
 
 // ExecutionPolicy provides policy / hardening knobs (host-configured).
-// All limits are clamped to executil hard maximums.
+// All limits are clamped to executil hard maximums (downstream enforcement).
 type ExecutionPolicy struct {
 	// If true, skip heuristic checks (fork-bomb/backgrounding).
 	// NOTE: hard-blocked commands are ALWAYS blocked.
@@ -28,6 +26,17 @@ type ExecutionPolicy struct {
 	MaxOutputBytes   int64
 	MaxCommands      int
 	MaxCommandLength int
+}
+
+// Clone returns an independent copy of the ExecutionPolicy.
+// (All fields are value types, so a plain copy is sufficient.)
+func (p *ExecutionPolicy) Clone() *ExecutionPolicy {
+	if p == nil {
+		return nil
+	}
+	cp := new(ExecutionPolicy)
+	*cp = *p
+	return cp
 }
 
 func DefaultExecutionPolicy() ExecutionPolicy {
@@ -40,48 +49,95 @@ func DefaultExecutionPolicy() ExecutionPolicy {
 	}
 }
 
-// ExecTool is an instance-owned execution tool runner (modeled after fstool.FSTool).
+type execToolPolicy struct {
+	allowedRoots    []string
+	workBaseDir     string
+	blockSymlinks   bool
+	blockedCommands map[string]struct{}
+
+	executionPolicy ExecutionPolicy
+	runScriptPolicy RunScriptPolicy
+}
+
+// Clone returns an independent copy of the policy snapshot.
+func (p *execToolPolicy) Clone() *execToolPolicy {
+	if p == nil {
+		return nil
+	}
+
+	cp := new(execToolPolicy)
+	*cp = *p // copy all value fields (and slice/map headers)
+
+	if p.allowedRoots != nil {
+		cp.allowedRoots = make([]string, len(p.allowedRoots))
+		copy(cp.allowedRoots, p.allowedRoots)
+	} else {
+		cp.allowedRoots = nil
+	}
+
+	if p.blockedCommands != nil {
+		cp.blockedCommands = make(map[string]struct{}, len(p.blockedCommands))
+		maps.Copy(cp.blockedCommands, p.blockedCommands)
+	} else {
+		cp.blockedCommands = nil
+	}
+
+	if c := p.executionPolicy.Clone(); c != nil {
+		cp.executionPolicy = *c
+	}
+
+	if c := p.runScriptPolicy.Clone(); c != nil {
+		cp.runScriptPolicy = *c
+	}
+
+	return cp
+}
+
+// ExecTool is an instance-owned execution tool runner.
 // It centralizes:
-//   - workBaseDir: base for resolving relative paths
-//   - allowedRoots: optional sandbox roots; if empty, allow all
+//   - path sandboxing (workBaseDir, allowedRoots, blockSymlinks)
 //   - execution policy (timeouts/output/limits)
+//   - command blocklist
 //   - session store for shellcommand
-//   - runscript policy (optional tool)
+//   - runscript policy (optional tool).
 type ExecTool struct {
 	mu sync.RWMutex
 
-	allowedRoots []string
-	// "workBaseDir" is the base for resolving relative paths and the default working directory.
-	// If allowedRoots is set and workBaseDir is empty, InitPathPolicy will default workBaseDir to the first allowed
-	// root.
-	workBaseDir     string
-	blockedCommands map[string]struct{} // includes executil.HardBlockedCommands
-
-	execPolicy      ExecutionPolicy
-	runScriptPolicy RunScriptPolicy
-
-	sessions *executil.SessionStore
+	toolPolicy *execToolPolicy
+	sessions   *executil.SessionStore
 }
 
 type ExecToolOption func(*ExecTool) error
 
 func WithAllowedRoots(roots []string) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.allowedRoots = roots
+		et.ensurePolicy()
+		et.toolPolicy.allowedRoots = roots
 		return nil
 	}
 }
 
 func WithWorkBaseDir(base string) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.workBaseDir = base
+		et.ensurePolicy()
+		et.toolPolicy.workBaseDir = base
+		return nil
+	}
+}
+
+// WithBlockSymlinks configures whether symlink traversal should be blocked (if supported downstream).
+func WithBlockSymlinks(block bool) ExecToolOption {
+	return func(et *ExecTool) error {
+		et.ensurePolicy()
+		et.toolPolicy.blockSymlinks = block
 		return nil
 	}
 }
 
 func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.execPolicy = p
+		et.ensurePolicy()
+		et.toolPolicy.executionPolicy = p
 		return nil
 	}
 }
@@ -90,6 +146,11 @@ func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 // Entries must be single command names (not full command lines).
 func WithBlockedCommands(cmds []string) ExecToolOption {
 	return func(et *ExecTool) error {
+		et.ensurePolicy()
+		if et.toolPolicy.blockedCommands == nil {
+			et.toolPolicy.blockedCommands = maps.Clone(executil.HardBlockedCommands)
+		}
+
 		for _, c := range cmds {
 			n, err := executil.NormalizeBlockedCommand(c)
 			if err != nil {
@@ -98,12 +159,13 @@ func WithBlockedCommands(cmds []string) ExecToolOption {
 			if n == "" {
 				continue
 			}
-			et.blockedCommands[n] = struct{}{}
+
+			et.toolPolicy.blockedCommands[n] = struct{}{}
 			if runtime.GOOS == toolutil.GOOSWindows {
 				ext := strings.ToLower(filepath.Ext(n))
 				switch ext {
 				case ".exe", ".com", ".bat", ".cmd":
-					et.blockedCommands[strings.TrimSuffix(n, ext)] = struct{}{}
+					et.toolPolicy.blockedCommands[strings.TrimSuffix(n, ext)] = struct{}{}
 				}
 			}
 		}
@@ -111,8 +173,23 @@ func WithBlockedCommands(cmds []string) ExecToolOption {
 	}
 }
 
+func WithRunScriptPolicy(p RunScriptPolicy) ExecToolOption {
+	return func(et *ExecTool) error {
+		et.ensurePolicy()
+		norm, err := NormalizeRunScriptPolicy(p)
+		if err != nil {
+			return err
+		}
+		et.toolPolicy.runScriptPolicy = norm
+		return nil
+	}
+}
+
 func WithSessionTTL(ttl time.Duration) ExecToolOption {
 	return func(et *ExecTool) error {
+		if et.sessions == nil {
+			et.sessions = executil.NewSessionStore()
+		}
 		et.sessions.SetTTL(ttl)
 		return nil
 	}
@@ -120,33 +197,28 @@ func WithSessionTTL(ttl time.Duration) ExecToolOption {
 
 func WithMaxSessions(maxSessions int) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.sessions.SetMaxSessions(maxSessions)
-		return nil
-	}
-}
-
-func WithRunScriptPolicy(p RunScriptPolicy) ExecToolOption {
-	return func(et *ExecTool) error {
-		norm, err := NormalizeRunScriptPolicy(p)
-		if err != nil {
-			return err
+		if et.sessions == nil {
+			et.sessions = executil.NewSessionStore()
 		}
-		et.runScriptPolicy = norm
+		et.sessions.SetMaxSessions(maxSessions)
 		return nil
 	}
 }
 
 func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 	et := &ExecTool{
-		allowedRoots:    nil,
-		workBaseDir:     "",
-		blockedCommands: maps.Clone(executil.HardBlockedCommands),
+		toolPolicy: &execToolPolicy{
+			allowedRoots:    nil,
+			workBaseDir:     "",
+			blockSymlinks:   false,
+			blockedCommands: maps.Clone(executil.HardBlockedCommands),
 
-		execPolicy:      DefaultExecutionPolicy(),
-		runScriptPolicy: DefaultRunScriptPolicy(),
-
+			executionPolicy: DefaultExecutionPolicy(),
+			runScriptPolicy: DefaultRunScriptPolicy(),
+		},
 		sessions: executil.NewSessionStore(),
 	}
+
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -156,112 +228,67 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 		}
 	}
 
-	eff, roots, err := fileutil.InitPathPolicy(et.workBaseDir, et.allowedRoots)
+	// Canonicalize/initialize path policy.
+	eff, roots, err := fileutil.InitPathPolicy(et.toolPolicy.workBaseDir, et.toolPolicy.allowedRoots)
 	if err != nil {
 		return nil, err
 	}
-	et.workBaseDir = eff
-	et.allowedRoots = roots
 
 	// Final defensive normalization (covers defaults and any options that didn't normalize).
-	et.runScriptPolicy, err = NormalizeRunScriptPolicy(et.runScriptPolicy)
+	rsPol, err := NormalizeRunScriptPolicy(et.toolPolicy.runScriptPolicy)
 	if err != nil {
 		return nil, err
+	}
+
+	et.toolPolicy = &execToolPolicy{
+		allowedRoots:    roots,
+		workBaseDir:     eff,
+		blockSymlinks:   et.toolPolicy.blockSymlinks,
+		blockedCommands: et.toolPolicy.blockedCommands,
+		executionPolicy: et.toolPolicy.executionPolicy,
+		runScriptPolicy: rsPol,
 	}
 
 	return et, nil
 }
 
-func (et *ExecTool) WorkBaseDir() string {
-	et.mu.RLock()
-	defer et.mu.RUnlock()
-	return et.workBaseDir
-}
-
-func (et *ExecTool) AllowedRoots() []string {
-	et.mu.RLock()
-	defer et.mu.RUnlock()
-	return slices.Clone(et.allowedRoots)
-}
-
-// SetAllowedRoots updates allowed roots at runtime (best-effort).
-// If the current workBaseDir is not within the new roots, this returns an error and leaves state unchanged.
-func (et *ExecTool) SetAllowedRoots(roots []string) error {
-	canon, err := fileutil.CanonicalizeAllowedRoots(roots)
-	if err != nil {
-		return err
-	}
-	et.mu.Lock()
-	defer et.mu.Unlock()
-	if _, err := fileutil.GetEffectiveWorkDir(et.workBaseDir, canon); err != nil {
-		return err
-	}
-	et.allowedRoots = canon
-	return nil
-}
-
-// SetWorkBaseDir updates the work base directory at runtime (best-effort).
-func (et *ExecTool) SetWorkBaseDir(base string) error {
-	et.mu.RLock()
-	roots := slices.Clone(et.allowedRoots)
-	et.mu.RUnlock()
-
-	b := strings.TrimSpace(base)
-	if b == "" {
-		// Mirror InitPathPolicy behavior:
-		// if a sandbox is configured, default base to the first allowed root;
-		// otherwise default to process CWD.
-		if len(roots) > 0 {
-			b = roots[0]
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			b = cwd
-		}
-	}
-	eff, err := fileutil.GetEffectiveWorkDir(b, roots)
-	if err != nil {
-		return err
-	}
-
-	et.mu.Lock()
-	et.workBaseDir = eff
-	et.mu.Unlock()
-	return nil
-}
-
-func (et *ExecTool) Tools() []spec.Tool {
-	return []spec.Tool{et.ShellCommandTool(), et.RunScriptTool()}
-}
-
-func (et *ExecTool) RunScriptTool() spec.Tool { return toolutil.CloneTool(runScriptToolSpec) }
+func (et *ExecTool) RunScriptTool() spec.Tool    { return toolutil.CloneTool(runScriptToolSpec) }
+func (et *ExecTool) ShellCommandTool() spec.Tool { return toolutil.CloneTool(shellCommandToolSpec) }
 
 func (et *ExecTool) RunScript(ctx context.Context, args RunScriptArgs) (*RunScriptOut, error) {
 	return toolutil.WithRecoveryResp(func() (*RunScriptOut, error) {
-		base, roots, execPol, blocked, rsPol := et.snapshot()
-		return runScript(ctx, args, base, roots, execPol, blocked, rsPol)
+		p := et.snapshotPolicy()
+		return runScript(ctx, args, *p)
 	})
 }
-
-func (et *ExecTool) ShellCommandTool() spec.Tool { return toolutil.CloneTool(shellCommandToolSpec) }
 
 func (et *ExecTool) ShellCommand(ctx context.Context, args ShellCommandArgs) (*ShellCommandOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ShellCommandOut, error) {
-		base, roots, policy, blocked, _ := et.snapshot()
-		return shellCommand(ctx, args, base, roots, policy, blocked, et.sessions)
+		p := et.snapshotPolicy()
+		return shellCommand(ctx, args, *p, et.sessions)
 	})
 }
 
-func (et *ExecTool) snapshot() (base string, roots []string, pol ExecutionPolicy, blocked map[string]struct{}, rsPol RunScriptPolicy) {
+func (et *ExecTool) snapshotPolicy() *execToolPolicy {
 	et.mu.RLock()
-	base = et.workBaseDir
-	roots = slices.Clone(et.allowedRoots)
-	pol = et.execPolicy
-	blocked = et.blockedCommands // treated as immutable after construction/options
-	rsPol = et.runScriptPolicy
+	p := et.toolPolicy
 	et.mu.RUnlock()
+	if p == nil {
+		return nil
+	}
+	return p.Clone()
+}
 
-	return base, roots, pol, blocked, rsPol
+func (et *ExecTool) ensurePolicy() {
+	if et.toolPolicy != nil {
+		return
+	}
+	et.toolPolicy = &execToolPolicy{
+		allowedRoots:    nil,
+		workBaseDir:     "",
+		blockSymlinks:   false,
+		blockedCommands: maps.Clone(executil.HardBlockedCommands),
+		executionPolicy: DefaultExecutionPolicy(),
+		runScriptPolicy: DefaultRunScriptPolicy(),
+	}
 }

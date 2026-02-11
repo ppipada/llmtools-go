@@ -131,7 +131,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "range-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := readTextRange(t.Context(), args, "", nil)
+			out, err := readTextRange(t.Context(), args, textToolPolicy{})
 			mustNoErr(t, err)
 			if len(out.Lines) != out.LinesReturned {
 				t.Fatalf("invariant failed: len(Lines)=%d but LinesReturned=%d", len(out.Lines), out.LinesReturned)
@@ -262,7 +262,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := readTextRange(ctx, args, "", nil)
+			_, err := readTextRange(ctx, args, textToolPolicy{})
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

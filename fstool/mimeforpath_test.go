@@ -189,7 +189,7 @@ func TestMIMEForPath(t *testing.T) {
 				ctx = tt.ctx(t)
 			}
 
-			out, err := mimeForPath(ctx, tt.args(t), "", nil)
+			out, err := mimeForPath(ctx, tt.args(t), fsToolPolicy{})
 
 			if tt.wantErr {
 				if err == nil {

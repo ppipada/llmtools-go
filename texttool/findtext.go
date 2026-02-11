@@ -140,10 +140,12 @@ type FindTextOut struct {
 //   - Returned lines are original file lines (not trimmed).
 //   - Deterministic: matches are returned in ascending file order up to maxMatches.
 //   - For queryType=lineBlock, overlapping matches are rejected.
-func findText(ctx context.Context, args FindTextArgs, workBaseDir string, allowedRoots []string) (*FindTextOut, error) {
+func findText(ctx context.Context, args FindTextArgs, tp textToolPolicy) (*FindTextOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 
 	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {

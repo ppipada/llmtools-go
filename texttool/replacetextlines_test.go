@@ -120,7 +120,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "repl-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := replaceTextLines(t.Context(), args, "", nil)
+			out, err := replaceTextLines(t.Context(), args, textToolPolicy{})
 			mustNoErr(t, err)
 			if out.ReplacementsMade != len(out.ReplacedAtLines) {
 				t.Fatalf(
@@ -289,7 +289,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := replaceTextLines(ctx, args, "", nil)
+			_, err := replaceTextLines(ctx, args, textToolPolicy{})
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

@@ -155,7 +155,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "insert-*.txt", tt.initial)
 			tt.args.Path = path
 
-			out, err := insertTextLines(t.Context(), tt.args, "", nil)
+			out, err := insertTextLines(t.Context(), tt.args, textToolPolicy{})
 			mustNoErr(t, err)
 
 			got := readFileString(t, path)
@@ -327,7 +327,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := insertTextLines(ctx, args, "", nil)
+			_, err := insertTextLines(ctx, args, textToolPolicy{})
 			if strings.Contains(tt.name, "context_canceled") {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

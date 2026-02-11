@@ -66,7 +66,7 @@ type MIMEForExtensionOut struct {
 // - mimeType: "application/octet-stream"
 // - known: false
 // and does NOT error (so calling code can continue).
-func mimeForExtension(ctx context.Context, args MIMEForExtensionArgs) (*MIMEForExtensionOut, error) {
+func mimeForExtension(ctx context.Context, args MIMEForExtensionArgs, tp fsToolPolicy) (*MIMEForExtensionOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

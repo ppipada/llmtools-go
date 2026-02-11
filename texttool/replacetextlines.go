@@ -102,13 +102,13 @@ type ReplaceTextLinesOut struct {
 func replaceTextLines(
 	ctx context.Context,
 	args ReplaceTextLinesArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp textToolPolicy,
 ) (*ReplaceTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

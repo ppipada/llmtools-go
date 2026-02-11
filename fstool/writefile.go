@@ -81,13 +81,13 @@ type WriteFileOut struct {
 func writeFile(
 	ctx context.Context,
 	args WriteFileArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp fsToolPolicy,
 ) (*WriteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

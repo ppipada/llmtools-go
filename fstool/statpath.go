@@ -51,10 +51,12 @@ type StatPathOut struct {
 }
 
 // statPath returns basic metadata for the supplied path without mutating the file system.
-func statPath(ctx context.Context, args StatPathArgs, workBaseDir string, allowedRoots []string) (*StatPathOut, error) {
+func statPath(ctx context.Context, args StatPathArgs, tp fsToolPolicy) (*StatPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

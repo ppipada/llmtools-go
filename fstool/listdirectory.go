@@ -54,12 +54,13 @@ type ListDirectoryOut struct {
 func listDirectory(
 	ctx context.Context,
 	args ListDirectoryArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp fsToolPolicy,
 ) (*ListDirectoryOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	dir, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, ".")
 	if err != nil {
 		return nil, err

@@ -90,12 +90,13 @@ type ReadTextRangeOut struct {
 func readTextRange(
 	ctx context.Context,
 	args ReadTextRangeArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp textToolPolicy,
 ) (*ReadTextRangeOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 
 	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -129,6 +130,39 @@ type RunScriptPolicy struct {
 	MaxArgBytes int
 }
 
+// Clone returns an independent copy of the RunScriptPolicy.
+// It deep-copies reference fields (slice/map). ExecutionPolicy is value-copied.
+//
+// Note: Map values (RunScriptInterpreter) are copied as-is. If RunScriptInterpreter
+// contains reference types that must be independent, add a Clone() for it and
+// use that in the map copy loop.
+func (p *RunScriptPolicy) Clone() *RunScriptPolicy {
+	if p == nil {
+		return nil
+	}
+
+	cp := new(RunScriptPolicy)
+	*cp = *p // copies scalar fields + slice/map headers (we fix those below)
+
+	if p.AllowedExtensions != nil {
+		cp.AllowedExtensions = make([]string, len(p.AllowedExtensions))
+		copy(cp.AllowedExtensions, p.AllowedExtensions)
+	} else {
+		cp.AllowedExtensions = nil
+	}
+
+	if p.InterpreterByExtension != nil {
+		cp.InterpreterByExtension = make(map[string]RunScriptInterpreter, len(p.InterpreterByExtension))
+		maps.Copy(cp.InterpreterByExtension, p.InterpreterByExtension)
+	} else {
+		cp.InterpreterByExtension = nil
+	}
+
+	cp.ExecutionPolicy = *p.ExecutionPolicy.Clone()
+
+	return cp
+}
+
 func DefaultRunScriptPolicy() RunScriptPolicy {
 	pyCmd := "python3"
 	pyShell := ShellNameSh
@@ -231,15 +265,17 @@ func NormalizeRunScriptPolicy(in RunScriptPolicy) (RunScriptPolicy, error) {
 func runScript(
 	ctx context.Context,
 	args RunScriptArgs,
-	workBaseDir string,
-	allowedRoots []string,
-	defaultExecPol ExecutionPolicy,
-	blocked map[string]struct{},
-	pol RunScriptPolicy,
+	tp execToolPolicy,
 ) (*RunScriptOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
+	defaultExecPol := tp.executionPolicy
+	blocked := tp.blockedCommands
+	pol := tp.runScriptPolicy
 
 	reqPath := strings.TrimSpace(args.Path)
 	if reqPath == "" {

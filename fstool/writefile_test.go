@@ -29,7 +29,7 @@ func TestWriteFile(t *testing.T) {
 				tmp := t.TempDir()
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
-				_, err := writeFile(ctx, WriteFileArgs{Path: filepath.Join(tmp, "a.txt"), Content: "x"}, "", nil)
+				_, err := writeFile(ctx, WriteFileArgs{Path: filepath.Join(tmp, "a.txt"), Content: "x"}, fsToolPolicy{})
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)
 				}
@@ -41,7 +41,11 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "text.txt")
-				out, err := writeFile(t.Context(), WriteFileArgs{Path: "  " + p + "  ", Content: "hello"}, "", nil)
+				out, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: "  " + p + "  ", Content: "hello"},
+					fsToolPolicy{},
+				)
 				if err != nil {
 					t.Fatalf("writeFile: %v", err)
 				}
@@ -73,10 +77,10 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "exists.txt")
-				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, "", nil); err != nil {
+				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, fsToolPolicy{}); err != nil {
 					t.Fatalf("seed write: %v", err)
 				}
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "b", Overwrite: false}, "", nil)
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "b", Overwrite: false}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -95,10 +99,10 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "ow.txt")
-				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, "", nil); err != nil {
+				if _, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "a"}, fsToolPolicy{}); err != nil {
 					t.Fatalf("seed write: %v", err)
 				}
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "bb", Overwrite: true}, "", nil)
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "bb", Overwrite: true}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("overwrite: %v", err)
 				}
@@ -120,7 +124,7 @@ func TestWriteFile(t *testing.T) {
 					Path:     p,
 					Encoding: "  BiNaRy ",
 					Content:  "  " + b64 + "  ",
-				}, "", nil)
+				}, fsToolPolicy{})
 				if err != nil {
 					t.Fatalf("writeFile: %v", err)
 				}
@@ -139,7 +143,11 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "badb64.dat")
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Encoding: "binary", Content: "!!!"}, "", nil)
+				_, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: p, Encoding: "binary", Content: "!!!"},
+					fsToolPolicy{},
+				)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -151,7 +159,11 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "nope", "a.txt")
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false}, "", nil)
+				_, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: p, Content: "x", CreateParents: false},
+					fsToolPolicy{},
+				)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -163,7 +175,11 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "a", "b", "c", "d.txt")
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "ok", CreateParents: true}, "", nil)
+				_, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: p, Content: "ok", CreateParents: true},
+					fsToolPolicy{},
+				)
 				if err != nil {
 					t.Fatalf("writeFile: %v", err)
 				}
@@ -178,7 +194,11 @@ func TestWriteFile(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "1", "2", "3", "4", "5", "6", "7", "8", "9", "f.txt")
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: true}, "", nil)
+				_, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: p, Content: "x", CreateParents: true},
+					fsToolPolicy{},
+				)
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -192,7 +212,7 @@ func TestWriteFile(t *testing.T) {
 			run: func(t *testing.T) {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: tmp, Content: "x"}, "", nil)
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: tmp, Content: "x"}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -205,7 +225,7 @@ func TestWriteFile(t *testing.T) {
 				tmp := t.TempDir()
 				p := filepath.Join(tmp, "badutf8.txt")
 				s := string([]byte{0xff, 0xfe})
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Encoding: "text", Content: s}, "", nil)
+				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Encoding: "text", Content: s}, fsToolPolicy{})
 				if err == nil {
 					t.Fatalf("expected error")
 				}
@@ -225,7 +245,11 @@ func TestWriteFile(t *testing.T) {
 					t.Skipf("symlink not supported: %v", err)
 				}
 				p := filepath.Join(linkDir, "child.txt")
-				_, err := writeFile(t.Context(), WriteFileArgs{Path: p, Content: "x", CreateParents: false}, "", nil)
+				_, err := writeFile(
+					t.Context(),
+					WriteFileArgs{Path: p, Content: "x", CreateParents: false},
+					fsToolPolicy{},
+				)
 				if err == nil {
 					t.Fatalf("expected error")
 				}

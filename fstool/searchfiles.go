@@ -62,12 +62,13 @@ type SearchFilesOut struct {
 func searchFiles(
 	ctx context.Context,
 	args SearchFilesArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp fsToolPolicy,
 ) (*SearchFilesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	root, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Root, ".")
 	if err != nil {
 		return nil, err

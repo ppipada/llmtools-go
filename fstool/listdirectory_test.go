@@ -95,7 +95,7 @@ func TestListDirectory(t *testing.T) {
 			if tt.name == "Default path lists current dir (deterministic)" {
 				t.Chdir(tmpDir)
 			}
-			out, err := listDirectory(ctx, tt.args, "", nil)
+			out, err := listDirectory(ctx, tt.args, fsToolPolicy{})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ListDirectory error = %v, wantErr = %v", err, tt.wantErr)
 			}

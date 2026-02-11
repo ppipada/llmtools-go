@@ -107,10 +107,7 @@ type ShellCommandOut struct {
 func shellCommand(
 	ctx context.Context,
 	args ShellCommandArgs,
-	workBaseDir string,
-	allowedRoots []string,
-	policy ExecutionPolicy,
-	blocked map[string]struct{},
+	tp execToolPolicy,
 	sessions *executil.SessionStore,
 ) (out *ShellCommandOut, err error) {
 	if err := ctx.Err(); err != nil {
@@ -119,6 +116,11 @@ func shellCommand(
 	if sessions == nil {
 		return nil, errors.New("invalid session store")
 	}
+
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
+	policy := tp.executionPolicy
+	blocked := tp.blockedCommands
 
 	args.SessionID = strings.TrimSpace(args.SessionID)
 

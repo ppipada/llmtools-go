@@ -90,7 +90,7 @@ func TestSearchFiles(t *testing.T) {
 			if tt.ctx != nil {
 				ctx = tt.ctx(t)
 			}
-			out, err := searchFiles(ctx, tt.args, "", nil)
+			out, err := searchFiles(ctx, tt.args, fsToolPolicy{})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("SearchFiles error = %v, wantErr = %v", err, tt.wantErr)
 			}

@@ -219,7 +219,7 @@ func TestReadFile(t *testing.T) {
 			if tt.ctx != nil {
 				ctx = tt.ctx(t)
 			}
-			outs, err := readFile(ctx, tt.args(t), "", nil)
+			outs, err := readFile(ctx, tt.args(t), fsToolPolicy{})
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err=%v wantErr=%v", err, tt.wantErr)

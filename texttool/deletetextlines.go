@@ -86,13 +86,13 @@ type DeleteTextLinesOut struct {
 func deleteTextLines(
 	ctx context.Context,
 	args DeleteTextLinesArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp textToolPolicy,
 ) (*DeleteTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

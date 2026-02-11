@@ -73,13 +73,13 @@ type ReadImageOut struct {
 func readImage(
 	ctx context.Context,
 	args ReadImageArgs,
-	workBaseDir string,
-	allowedRoots []string,
+	tp imageToolPolicy,
 ) (*ReadImageOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
+	workBaseDir := tp.workBaseDir
+	allowedRoots := tp.allowedRoots
 	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
 	if err != nil {
 		return nil, err

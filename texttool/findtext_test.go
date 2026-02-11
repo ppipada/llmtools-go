@@ -226,7 +226,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "find-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := findText(t.Context(), args, "", nil)
+			out, err := findText(t.Context(), args, textToolPolicy{})
 			mustNoErr(t, err)
 			if out.MatchesReturned != len(out.Matches) {
 				t.Fatalf("invariant failed: MatchesReturned=%d len(Matches)=%d", out.MatchesReturned, len(out.Matches))
@@ -516,7 +516,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := findText(ctx, args, "", nil)
+			_, err := findText(ctx, args, textToolPolicy{})
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

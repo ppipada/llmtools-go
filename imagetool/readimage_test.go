@@ -222,7 +222,7 @@ func TestReadImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := readImage(tt.ctx, tt.args, "", nil)
+			out, err := readImage(tt.ctx, tt.args, imageToolPolicy{})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)
