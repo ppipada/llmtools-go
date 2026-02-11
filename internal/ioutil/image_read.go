@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 type ImageInfo struct {
@@ -32,10 +34,15 @@ type ImageData struct {
 }
 
 // ReadImage inspects an image file and returns its intrinsic metadata.
-// If includeBase64 is true, Base64Data will contain the base64-encoded file
-// contents. If the file does not exist, Exists == false and err == nil.
-// Returns an error if the path is empty, a directory, or not a supported image.
+// If includeBase64 is true, Base64Data will contain the base64-encoded file contents.
+// If the file does not exist, Exists == false and err == nil.
+//
+// FSPolicy enforcement:
+//   - path is resolved via policy (base dir + allowed roots)
+//   - if policy.BlockSymlinks == true: refuses symlink parent components and refuses symlink file.
+//   - even if symlinks are allowed, symlink files are refused (strict).
 func ReadImage(
+	p fspolicy.FSPolicy,
 	path string,
 	includeBase64Data bool,
 	maxBytes int64,
@@ -45,17 +52,16 @@ func ReadImage(
 	}
 
 	out := &ImageData{}
-	p, err := NormalizePath(path)
+
+	abs, err := p.ResolvePath(path, "")
 	if err != nil {
 		return nil, err
 	}
-	out.Path = p
+	out.Path = abs
 
-	// Refuse symlink traversal in parent directories (best-effort hardening).
-	// Preserve current semantics: if parent doesn't exist, treat as "file doesn't exist".
-	parent := filepath.Dir(p)
-	if parent != "" && parent != "." {
-		if err := VerifyDirNoSymlink(parent); err != nil {
+	parent := filepath.Dir(abs)
+	if p.BlockSymlinks() && parent != "" && parent != "." {
+		if err := p.VerifyDirResolved(parent); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				out.Exists = false
 				return out, nil
@@ -64,7 +70,7 @@ func ReadImage(
 		}
 	}
 
-	st, err := os.Lstat(p)
+	st, err := os.Lstat(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			out.Exists = false
@@ -72,6 +78,7 @@ func ReadImage(
 		}
 		return nil, err
 	}
+
 	out.Exists = true
 	out.Name = st.Name()
 	out.IsDir = st.IsDir()
@@ -80,27 +87,21 @@ func ReadImage(
 	out.ModTime = &mt
 
 	if (st.Mode() & os.ModeSymlink) != 0 {
-		return nil, fmt.Errorf("refusing to operate on symlink file: %s", p)
+		if p.BlockSymlinks() {
+			return nil, fmt.Errorf("%w: refusing to operate on symlink file: %s", fspolicy.ErrSymlinkDisallowed, abs)
+		}
+		// Even if symlinks allowed, image decoding would follow; keep strict.
+		return nil, fmt.Errorf("refusing to operate on symlink file: %s", abs)
 	}
 
 	if out.IsDir {
 		return nil, errors.New("path points to a directory, expected file")
 	}
 	if !st.Mode().IsRegular() {
-		return nil, fmt.Errorf("expected regular file: %s", p)
+		return nil, fmt.Errorf("expected regular file: %s", abs)
 	}
 
-	// We need to decode the image config; if includeBase64 is true, we can
-	// read the whole file once and reuse that data for both config and base64.
 	if includeBase64Data {
-		if maxBytes > 0 && out.Size > maxBytes {
-			return nil, fmt.Errorf(
-				"file %q exceeds maximum allowed size (%d bytes): %w",
-				out.Path,
-				maxBytes,
-				ErrFileExceedsMaxSize,
-			)
-		}
 
 		f, err := os.Open(out.Path)
 		if err != nil {
@@ -112,6 +113,7 @@ func ReadImage(
 		if maxBytes > 0 {
 			r = io.LimitReader(f, maxBytes+1)
 		}
+
 		data, err := io.ReadAll(r)
 		if err != nil {
 			return nil, err
@@ -126,8 +128,7 @@ func ReadImage(
 		}
 
 		reader := bytes.NewReader(data)
-		err = decodeImageConfig(out, reader)
-		if err != nil {
+		if err := decodeImageConfig(out, reader); err != nil {
 			return nil, err
 		}
 		out.Base64Data = base64.StdEncoding.EncodeToString(data)
@@ -140,13 +141,13 @@ func ReadImage(
 		return nil, err
 	}
 	defer f.Close()
+
 	r := io.Reader(f)
 	if maxBytes > 0 {
-		// Config decode should only need headers, but keep it bounded anyway.
 		r = io.LimitReader(f, maxBytes)
 	}
-	err = decodeImageConfig(out, r)
-	if err != nil {
+
+	if err := decodeImageConfig(out, r); err != nil {
 		return nil, err
 	}
 
@@ -162,6 +163,7 @@ func decodeImageConfig(info *ImageData, reader io.Reader) error {
 	info.Width = cfg.Width
 	info.Height = cfg.Height
 	info.Format = fmtName
+
 	m, err := MIMEFromExtensionString(fmtName)
 	if err != nil {
 		return fmt.Errorf("unsupported image format %q: %w", fmtName, err)

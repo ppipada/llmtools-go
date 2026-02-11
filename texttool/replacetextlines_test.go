@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestReplaceTextLines_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name         string
 		initial      string
@@ -120,7 +125,7 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "repl-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := replaceTextLines(t.Context(), args, textToolPolicy{})
+			out, err := replaceTextLines(t.Context(), args, policy)
 			mustNoErr(t, err)
 			if out.ReplacementsMade != len(out.ReplacedAtLines) {
 				t.Fatalf(
@@ -157,7 +162,10 @@ func TestReplaceTextLines_HappyPaths(t *testing.T) {
 
 func TestReplaceTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name              string
 		setup             func() string
@@ -289,7 +297,7 @@ func TestReplaceTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := replaceTextLines(ctx, args, textToolPolicy{})
+			_, err := replaceTextLines(ctx, args, policy)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

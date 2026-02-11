@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"errors"
@@ -226,14 +226,15 @@ func TestMIMEForLocalFile_ExtensionVsSniff(t *testing.T) {
 				if err == nil {
 					t.Fatalf("expected error, got nil (mt=%q mode=%q method=%q)", mt, mode, method)
 				}
+				if tc.wantNotExist && !os.IsNotExist(err) {
+					t.Fatalf("expected not-exist error, got: %v", err)
+				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tc.wantNotExist && !os.IsNotExist(err) {
-				t.Fatalf("expected not-exist error, got: %v", err)
-			}
+
 			if method != tc.wantMethod {
 				t.Fatalf("method=%q want=%q", method, tc.wantMethod)
 			}

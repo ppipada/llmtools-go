@@ -1,14 +1,13 @@
-package fileutil
+package ioutil
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 var (
@@ -48,26 +47,22 @@ func (t *TextFile) Render() string {
 // ReadTextFileUTF8 reads a file as UTF‑8 text and returns a normalized TextFile view.
 // It preserves newline kind (LF vs CRLF) and whether the file ended with a final newline.
 //
-// Safety behavior:
+// Safety behavior (policy-driven):
 //   - Enforces maxBytes if > 0.
-//   - Refuses symlink file and symlink parent directories (best effort).
-//   - Validates UTF‑8.
-func ReadTextFileUTF8(path string, maxBytes int64) (*TextFile, error) {
-	p, err := NormalizePath(path)
+//   - Uses policy.RequireExistingRegularFile (which enforces symlink rules if enabled).
+func ReadTextFileUTF8(p fspolicy.FSPolicy, path string, maxBytes int64) (*TextFile, error) {
+	abs, err := p.ResolvePath(path, "")
 	if err != nil {
 		return nil, err
 	}
 
-	st, err := RequireExistingRegularFileNoSymlink(p)
+	st, err := p.RequireExistingRegularFileResolved(abs)
 	if err != nil {
 		return nil, err
-	}
-	if maxBytes > 0 && st.Size() > maxBytes {
-		return nil, fmt.Errorf("file %q, allowed size %d bytes, error: %w", p, maxBytes, ErrFileExceedsMaxSize)
 	}
 
 	// Use existing utility (bounded).
-	s, err := ReadFile(p, ReadEncodingText, maxBytes)
+	s, err := ReadFile(abs, ReadEncodingText, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +83,7 @@ func ReadTextFileUTF8(path string, maxBytes int64) (*TextFile, error) {
 
 	mt := st.ModTime().UTC()
 	out := &TextFile{
-		Path:            p,
+		Path:            abs,
 		Perm:            st.Mode().Perm(),
 		Newline:         kind,
 		HasFinalNewline: hasFinal,
@@ -97,39 +92,6 @@ func ReadTextFileUTF8(path string, maxBytes int64) (*TextFile, error) {
 		ModTimeUTC:      &mt,
 	}
 	return out, nil
-}
-
-// RequireExistingRegularFileNoSymlink validates that path exists, is a regular file,
-// and is NOT a symlink (Lstat-based). It also verifies the parent directory contains
-// no symlink components (best-effort hardening).
-func RequireExistingRegularFileNoSymlink(path string) (fs.FileInfo, error) {
-	p, err := NormalizePath(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Ensure parent path components are not symlinks.
-	parent := filepath.Dir(p)
-	if parent != "" && parent != "." {
-		if err := VerifyDirNoSymlink(parent); err != nil {
-			return nil, err
-		}
-	}
-
-	st, err := os.Lstat(p)
-	if err != nil {
-		return nil, fmt.Errorf("got stat file error: %w", err)
-	}
-	if (st.Mode() & os.ModeSymlink) != 0 {
-		return nil, fmt.Errorf("refusing to operate on symlink file: %s", p)
-	}
-	if st.IsDir() {
-		return nil, fmt.Errorf("expected file but got directory: %s", p)
-	}
-	if !st.Mode().IsRegular() {
-		return nil, fmt.Errorf("expected regular file: %s", p)
-	}
-	return st, nil
 }
 
 func detectNewlineKind(s string) NewlineKind {

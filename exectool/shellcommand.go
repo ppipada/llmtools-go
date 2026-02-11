@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -117,8 +116,7 @@ func shellCommand(
 		return nil, errors.New("invalid session store")
 	}
 
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
+	fsPol := tp.fsPolicy
 	policy := tp.executionPolicy
 	blocked := tp.blockedCommands
 
@@ -164,23 +162,17 @@ func shellCommand(
 	// "executeParallel=true" => treat commands as independent => do not stop on error.
 	stopOnError := !args.ExecuteParallel
 
-	// Resolve args.WorkDir relative to workBaseDir (fstool-consistent).
-	inputWorkDirAbs := ""
-	if strings.TrimSpace(args.WorkDir) != "" && strings.TrimSpace(args.WorkDir) != "." {
-		p, rerr := fileutil.ResolvePath(workBaseDir, allowedRoots, args.WorkDir, "")
-		if rerr != nil {
-			return nil, rerr
-		}
-		inputWorkDirAbs = p
-	}
-
-	// Determine effective workdir (args > session > workBaseDir).
-	workdir, err := sess.GetEffectiveWorkdir(inputWorkDirAbs, workBaseDir, allowedRoots)
+	// Determine effective workdir string (args > session > policy base dir), then
+	// resolve + verify once using fspolicy.
+	workdirCandidate, err := sess.GetEffectiveWorkdir(args.WorkDir, fsPol.WorkBaseDir())
 	if err != nil {
 		return nil, err
 	}
-	// Extra hardening: refuse symlink traversal in workdir path components.
-	if err := fileutil.VerifyDirNoSymlink(workdir); err != nil {
+	workdirAbs, err := fsPol.ResolvePath(workdirCandidate, fsPol.WorkBaseDir())
+	if err != nil {
+		return nil, err
+	}
+	if err := fsPol.VerifyDirResolved(workdirAbs); err != nil {
 		return nil, err
 	}
 
@@ -205,7 +197,7 @@ func shellCommand(
 
 	// Persist session defaults if caller provided values.
 	if strings.TrimSpace(args.WorkDir) != "" {
-		sess.SetWorkDir(workdir)
+		sess.SetWorkDir(workdirAbs)
 	}
 	if err := sess.AddToEnv(args.Env); err != nil {
 		return nil, err
@@ -239,12 +231,12 @@ func shellCommand(
 			return nil, err
 		}
 
-		res, runErr := executil.RunOneShellCommand(ctx, sel, command, workdir, env, timeout, maxOut)
+		res, runErr := executil.RunOneShellCommand(ctx, sel, command, workdirAbs, env, timeout, maxOut)
 		if runErr != nil {
 			// Return structured output when possible.
 			res = ShellCommandExecResult{
 				Command:   command,
-				WorkDir:   workdir,
+				WorkDir:   workdirAbs,
 				Shell:     sel.Name,
 				ShellPath: sel.Path,
 
@@ -263,7 +255,7 @@ func shellCommand(
 
 	resp := ShellCommandOut{
 		SessionID: args.SessionID,
-		WorkDir:   workdir,
+		WorkDir:   workdirAbs,
 		Results:   results,
 	}
 	return &resp, nil

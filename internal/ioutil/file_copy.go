@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 
 // CopyFileToExistingCtx copies src -> dst where dst is expected to already exist (typically a placeholder reserved with
 // O_EXCL). "dst" is truncated and overwritten.
+//
+// NOTE: This is a raw IO helper; callers should resolve/enforce policy before calling.
 func CopyFileToExistingCtx(ctx context.Context, src, dst string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -66,6 +68,8 @@ func CopyFileToExistingCtx(ctx context.Context, src, dst string) (int64, error) 
 
 // CopyFileCtx copies src->dst, creating dst with O_EXCL.
 // It checks ctx between read iterations.
+//
+// NOTE: This is a raw IO helper; callers should resolve/enforce policy before calling.
 func CopyFileCtx(ctx context.Context, src, dst string, perm os.FileMode) (written int64, err error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

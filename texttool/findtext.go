@@ -7,7 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -140,15 +141,8 @@ type FindTextOut struct {
 //   - Returned lines are original file lines (not trimmed).
 //   - Deterministic: matches are returned in ascending file order up to maxMatches.
 //   - For queryType=lineBlock, overlapping matches are rejected.
-func findText(ctx context.Context, args FindTextArgs, tp textToolPolicy) (*FindTextOut, error) {
+func findText(ctx context.Context, args FindTextArgs, p fspolicy.FSPolicy) (*FindTextOut, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
 		return nil, err
 	}
 
@@ -175,7 +169,7 @@ func findText(ctx context.Context, args FindTextArgs, tp textToolPolicy) (*FindT
 		return nil, fmt.Errorf("maxMatches too large: %d", maxMatches)
 	}
 
-	tf, err := fileutil.ReadTextFileUTF8(path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +210,8 @@ func findText(ctx context.Context, args FindTextArgs, tp textToolPolicy) (*FindT
 
 	if qtype == findTypeLineBlock {
 		// Normalize input block so accidental embedded newlines in JSON strings behave sensibly.
-		block = fileutil.NormalizeLineBlockInput(args.MatchLines)
+		block = ioutil.NormalizeLineBlockInput(args.MatchLines)
+
 		if len(block) == 0 {
 			return nil, errors.New("matchLines is required for queryType=lineBlock")
 		}
@@ -297,10 +292,10 @@ func findText(ctx context.Context, args FindTextArgs, tp textToolPolicy) (*FindT
 
 	case findTypeLineBlock:
 		// Find all occurrences of the trimmed-equal block.
-		idxs := fileutil.FindTrimmedBlockMatches(tf.Lines, block)
+		idxs := ioutil.FindTrimmedBlockMatches(tf.Lines, block)
 
 		// Overlap guard: overlapping matches for blocks are confusing, fail fast.
-		if err := fileutil.EnsureNonOverlappingFixedWidth(idxs, len(block)); err != nil {
+		if err := ioutil.EnsureNonOverlappingFixedWidth(idxs, len(block)); err != nil {
 			return nil, err
 		}
 

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestReadImage(t *testing.T) {
@@ -67,7 +67,7 @@ func TestReadImage(t *testing.T) {
 				if !out.Exists {
 					t.Fatalf("expected Exists=true")
 				}
-				cleanpath := filepath.Clean(fileutil.ApplyDarwinSystemRootAliases(imgPath))
+				cleanpath := filepath.Clean(imgPath)
 				if out.Path != cleanpath {
 					t.Fatalf(
 						"Path mismatch: got %q want %q",
@@ -222,7 +222,11 @@ func TestReadImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := readImage(tt.ctx, tt.args, imageToolPolicy{})
+			p, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			out, err := readImage(tt.ctx, tt.args, p)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)

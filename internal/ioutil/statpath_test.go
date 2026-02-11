@@ -1,10 +1,15 @@
-package fileutil
+package ioutil
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestStatPath(t *testing.T) {
@@ -69,7 +74,11 @@ func TestStatPath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := StatPath(tc.path)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			got, err := StatPath(policy, tc.path)
 
 			if tc.wantErr {
 				if err == nil {
@@ -172,5 +181,44 @@ func TestGetPathInfoFromFileInfo(t *testing.T) {
 				t.Errorf("ModTime = %v, want %v", got.ModTime, info.ModTime().UTC())
 			}
 		})
+	}
+}
+
+func TestStatPath_SymlinkBehavior(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == toolutil.GOOSWindows {
+		t.Skip("symlink test skipped on Windows")
+	}
+
+	dir := t.TempDir()
+	realTxt := filepath.Join(dir, "real.txt")
+	mustWriteBytes(t, realTxt, []byte("x"))
+
+	link := filepath.Join(dir, "link.txt")
+	mustSymlinkOrSkip(t, realTxt, link)
+
+	pBlock, err := fspolicy.New(dir, nil, true)
+	if err != nil {
+		t.Fatalf("New policy block: %v", err)
+	}
+	_, err = StatPath(pBlock, link)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !errors.Is(err, fspolicy.ErrSymlinkDisallowed) {
+		t.Fatalf("err=%v; want errors.Is(_, %v)=true", err, fspolicy.ErrSymlinkDisallowed)
+	}
+
+	pAllow, err := fspolicy.New(dir, nil, false)
+	if err != nil {
+		t.Fatalf("New policy allow: %v", err)
+	}
+	info, err := StatPath(pAllow, link)
+	if err != nil {
+		t.Fatalf("StatPath error: %v", err)
+	}
+	if info == nil || !info.Exists || info.IsDir {
+		t.Fatalf("unexpected PathInfo: %+v", info)
 	}
 }

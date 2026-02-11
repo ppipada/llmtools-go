@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -81,37 +81,29 @@ type WriteFileOut struct {
 func writeFile(
 	ctx context.Context,
 	args WriteFileArgs,
-	tp fsToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*WriteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
-
-	enc := fileutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
-
+	enc := ioutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
 	if enc == "" {
-		enc = fileutil.ReadEncodingText
+		enc = ioutil.ReadEncodingText
 	}
-	if enc != fileutil.ReadEncodingText && enc != fileutil.ReadEncodingBinary {
+	if enc != ioutil.ReadEncodingText && enc != ioutil.ReadEncodingBinary {
 		return nil, errors.New(`encoding must be "text" or "binary"`)
 	}
 
 	// Decode/validate content.
 	var data []byte
 	switch enc {
-	case fileutil.ReadEncodingText:
+	case ioutil.ReadEncodingText:
 		// Content is required by schema, but empty string is a valid payload.
 		if !utf8.ValidString(args.Content) {
 			return nil, errors.New("content is not valid UTF-8")
 		}
 		data = []byte(args.Content)
-	case fileutil.ReadEncodingBinary:
+	case ioutil.ReadEncodingBinary:
 		b64 := strings.TrimSpace(args.Content)
 		// Pre-check decoded size to avoid huge allocations.
 		if int64(base64.StdEncoding.DecodedLen(len(b64))) > toolutil.MaxFileWriteBytes {
@@ -128,49 +120,26 @@ func writeFile(
 		return nil, fmt.Errorf("content too large (%d bytes; max %d)", len(data), toolutil.MaxFileWriteBytes)
 	}
 
-	parent := filepath.Dir(p)
-	if parent == "" || parent == "." {
-		// With absolute paths this should not happen, but keep it defensive.
-		return nil, fileutil.ErrInvalidPath
-	}
-
-	if args.CreateParents {
-		_, err := fileutil.EnsureDirNoSymlink(parent, 8 /*max new dirs*/)
-		if err != nil {
-			return nil, err
-		}
-
-	} else {
-		if err := fileutil.VerifyDirNoSymlink(parent); err != nil {
-			return nil, err
-		}
-	}
-
-	// Validate existing destination if present.
-	if st, err := os.Lstat(p); err == nil {
-		if st.IsDir() {
-			return nil, fmt.Errorf("path is a directory, not a file: %s", p)
-		}
-		// Refuse special files (device nodes, pipes, sockets, etc.)
-		if !st.Mode().IsRegular() && (st.Mode()&os.ModeSymlink) == 0 {
-			return nil, fmt.Errorf("refusing to write to non-regular file: %s", p)
-		}
-		if !args.Overwrite {
-			return nil, fmt.Errorf("file already exists and overwrite=false: %s", p)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-
-	if err := fileutil.WriteFileAtomicBytes(p, data, 0o600, args.Overwrite); err != nil {
-		// Provide stable tool error message for the most common case.
+	dst, err := ioutil.WriteFileAtomicBytesWithParents(
+		p,
+		args.Path,
+		data,
+		0o600,
+		args.Overwrite,
+		args.CreateParents,
+		8, // max new dirs
+	)
+	if err != nil {
 		if !args.Overwrite && errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("file already exists and overwrite=false: %s", p)
+			if dst == "" {
+				dst = args.Path
+			}
+			return nil, fmt.Errorf("file already exists and overwrite=false: %s", dst)
 		}
 		return nil, err
 	}
 	return &WriteFileOut{
-		Path:         p,
+		Path:         dst,
 		BytesWritten: int64(len(data)),
 	}, nil
 }

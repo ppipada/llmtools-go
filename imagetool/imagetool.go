@@ -4,26 +4,15 @@ import (
 	"context"
 	"sync"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-// imageToolPolicy centralizes sandbox/path policy for this tool instance.
-type imageToolPolicy struct {
+type imageToolConfig struct {
 	allowedRoots  []string
 	workBaseDir   string
 	blockSymlinks bool
-}
-
-// Clone returns an independent copy of the policy.
-func (p *imageToolPolicy) Clone() *imageToolPolicy {
-	if p == nil {
-		return nil
-	}
-	cp := *p
-	cp.allowedRoots = append([]string(nil), p.allowedRoots...)
-	return &cp
 }
 
 // ImageTool is an instance-owned image tool runner.
@@ -32,28 +21,23 @@ func (p *imageToolPolicy) Clone() *imageToolPolicy {
 //   - allowedRoots: optional restriction; if empty/nil, allow all
 //   - blockSymlinks: blocks symlink traversal (if enforced downstream).
 type ImageTool struct {
-	mu         sync.RWMutex
-	toolPolicy *imageToolPolicy
+	mu     sync.RWMutex
+	cfg    imageToolConfig
+	policy fspolicy.FSPolicy
 }
 
 type ImageToolOption func(*ImageTool) error
 
 func WithAllowedRoots(roots []string) ImageToolOption {
 	return func(it *ImageTool) error {
-		if it.toolPolicy == nil {
-			it.toolPolicy = &imageToolPolicy{}
-		}
-		it.toolPolicy.allowedRoots = roots
+		it.cfg.allowedRoots = roots
 		return nil
 	}
 }
 
 func WithWorkBaseDir(base string) ImageToolOption {
 	return func(it *ImageTool) error {
-		if it.toolPolicy == nil {
-			it.toolPolicy = &imageToolPolicy{}
-		}
-		it.toolPolicy.workBaseDir = base
+		it.cfg.workBaseDir = base
 		return nil
 	}
 }
@@ -61,17 +45,14 @@ func WithWorkBaseDir(base string) ImageToolOption {
 // WithBlockSymlinks configures whether symlink traversal should be blocked (if supported downstream).
 func WithBlockSymlinks(block bool) ImageToolOption {
 	return func(it *ImageTool) error {
-		if it.toolPolicy == nil {
-			it.toolPolicy = &imageToolPolicy{}
-		}
-		it.toolPolicy.blockSymlinks = block
+		it.cfg.blockSymlinks = block
 		return nil
 	}
 }
 
 func NewImageTool(opts ...ImageToolOption) (*ImageTool, error) {
 	it := &ImageTool{
-		toolPolicy: &imageToolPolicy{
+		cfg: imageToolConfig{
 			allowedRoots:  nil,
 			workBaseDir:   "",
 			blockSymlinks: false,
@@ -87,16 +68,11 @@ func NewImageTool(opts ...ImageToolOption) (*ImageTool, error) {
 		}
 	}
 
-	eff, roots, err := fileutil.InitPathPolicy(it.toolPolicy.workBaseDir, it.toolPolicy.allowedRoots)
+	pol, err := fspolicy.New(it.cfg.workBaseDir, it.cfg.allowedRoots, it.cfg.blockSymlinks)
 	if err != nil {
 		return nil, err
 	}
-
-	it.toolPolicy = &imageToolPolicy{
-		allowedRoots:  roots,
-		workBaseDir:   eff,
-		blockSymlinks: it.toolPolicy.blockSymlinks,
-	}
+	it.policy = pol
 
 	return it, nil
 }
@@ -106,16 +82,13 @@ func (it *ImageTool) ReadImageTool() spec.Tool { return toolutil.CloneTool(readI
 func (it *ImageTool) ReadImage(ctx context.Context, args ReadImageArgs) (*ReadImageOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ReadImageOut, error) {
 		p := it.snapshotPolicy()
-		return readImage(ctx, args, *p)
+		return readImage(ctx, args, p)
 	})
 }
 
-func (it *ImageTool) snapshotPolicy() *imageToolPolicy {
+func (it *ImageTool) snapshotPolicy() fspolicy.FSPolicy {
 	it.mu.RLock()
-	p := it.toolPolicy
+	p := it.policy
 	it.mu.RUnlock()
-	if p == nil {
-		return nil
-	}
-	return p.Clone()
+	return p
 }

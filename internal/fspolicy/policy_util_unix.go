@@ -1,4 +1,6 @@
-package fileutil
+//go:build !windows
+
+package fspolicy
 
 import (
 	"os"
@@ -10,7 +12,6 @@ import (
 )
 
 // Root-level macOS compatibility symlinks we allow and normalize.
-// Keep this list small and explicit.
 var darwinSystemSymlinkAliases = map[string]string{
 	"/var":  "/private/var",
 	"/tmp":  "/private/tmp",
@@ -20,20 +21,24 @@ var darwinSystemSymlinkAliases = map[string]string{
 	"/lib":  "/usr/lib",
 }
 
-// ApplyDarwinSystemRootAliases rewrites known macOS root-level compatibility symlink prefixes
-// to their canonical target paths (e.g. /var/... -> /private/var/...).
-//
+func rejectDriveRelativePath(p string) error {
+	_ = p
+	return nil
+}
+
+// applySystemRootAliases rewrites known unix (currently supported macOS) root-level
+// compatibility symlink prefixes to their canonical target paths.
 // It does not access the filesystem and does not resolve arbitrary symlinks.
-func ApplyDarwinSystemRootAliases(p string) string {
-	if runtime.GOOS != toolutil.GOOSDarwin {
-		return p
-	}
+func applySystemRootAliases(p string) string {
 	if strings.TrimSpace(p) == "" {
 		return p
 	}
 	clean := filepath.Clean(p)
-	sep := string(os.PathSeparator)
+	if runtime.GOOS != toolutil.GOOSDarwin {
+		return clean
+	}
 
+	sep := string(os.PathSeparator)
 	for from, to := range darwinSystemSymlinkAliases {
 		if clean == from {
 			return to
@@ -45,20 +50,13 @@ func ApplyDarwinSystemRootAliases(p string) string {
 	return clean
 }
 
-// allowDarwinSystemSymlink checks whether cur is one of the macOS compatibility
-// symlinks and (if so) returns the expected resolved absolute directory.
-//
-// This allows us to keep "no symlink traversal" behavior while permitting:
-//
-//	/var -> /private/var
-//	/tmp -> /private/tmp
-//	/etc -> /private/etc
-//
-// (You can extend this list if needed, but keep it small.)
-func allowDarwinSystemSymlink(cur string) (resolved string, ok bool, err error) {
+// allowSystemSymlink checks whether cur is one of the known (currently macOS)
+// compatibility symlinks and (if so) returns the expected resolved absolute directory.
+func allowSystemSymlink(cur string) (resolved string, ok bool, err error) {
 	if runtime.GOOS != toolutil.GOOSDarwin {
 		return "", false, nil
 	}
+
 	// Only allow exact root-level paths.
 	expected, okAlias := darwinSystemSymlinkAliases[cur]
 	if !okAlias || expected == "" {

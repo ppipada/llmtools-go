@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"strings"
@@ -229,22 +229,4 @@ func TestIsBlockEqualsAt(t *testing.T) {
 			}
 		})
 	}
-}
-
-func equalIntSlices(a, b []int) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

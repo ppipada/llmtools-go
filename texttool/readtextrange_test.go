@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestReadTextRange_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name         string
 		initial      string
@@ -131,7 +136,7 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "range-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := readTextRange(t.Context(), args, textToolPolicy{})
+			out, err := readTextRange(t.Context(), args, policy)
 			mustNoErr(t, err)
 			if len(out.Lines) != out.LinesReturned {
 				t.Fatalf("invariant failed: len(Lines)=%d but LinesReturned=%d", len(out.Lines), out.LinesReturned)
@@ -165,7 +170,10 @@ func TestReadTextRange_HappyPaths(t *testing.T) {
 
 func TestReadTextRange_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name       string
 		setup      func() string
@@ -262,7 +270,7 @@ func TestReadTextRange_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := readTextRange(ctx, args, textToolPolicy{})
+			_, err := readTextRange(ctx, args, policy)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

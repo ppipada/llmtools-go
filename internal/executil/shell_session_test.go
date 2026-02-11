@@ -150,13 +150,6 @@ func TestShellSession_GetEffectiveWorkdir_FallbackOrder(t *testing.T) {
 			wantSameAs:    td2,
 			wantErrSubstr: "",
 		},
-		{
-			name:          "outside_roots_errors",
-			input:         td2,
-			def:           "",
-			roots:         []string{td},
-			wantErrSubstr: "outside allowed roots",
-		},
 	}
 
 	// Need a fresh session for "no session" scenario.
@@ -169,7 +162,7 @@ func TestShellSession_GetEffectiveWorkdir_FallbackOrder(t *testing.T) {
 				use = sNoWD
 			}
 
-			got, err := use.GetEffectiveWorkdir(tc.input, tc.def, tc.roots)
+			got, err := use.GetEffectiveWorkdir(tc.input, tc.def)
 			if tc.wantErrSubstr != "" {
 				if err == nil {
 					t.Fatalf("expected error")
@@ -252,7 +245,7 @@ func TestShellSession_GetEffectiveWorkdir_RejectsInvalidSession(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.sess.GetEffectiveWorkdir(tc.input, tc.def, nil)
+			_, err := tc.sess.GetEffectiveWorkdir(tc.input, tc.def)
 			if err == nil {
 				t.Fatalf("expected error")
 			}
@@ -278,7 +271,7 @@ func TestShellSession_GetEffectiveWorkdir_DefaultsToCWDWhenAllEmpty(t *testing.T
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := s.GetEffectiveWorkdir("", "", nil)
+			got, err := s.GetEffectiveWorkdir("", "")
 			if err != nil {
 				t.Fatalf("GetEffectiveWorkdir: %v", err)
 			}

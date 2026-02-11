@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -51,18 +52,12 @@ type StatPathOut struct {
 }
 
 // statPath returns basic metadata for the supplied path without mutating the file system.
-func statPath(ctx context.Context, args StatPathArgs, tp fsToolPolicy) (*StatPathOut, error) {
+func statPath(ctx context.Context, args StatPathArgs, p fspolicy.FSPolicy) (*StatPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
 
-	pathInfo, err := fileutil.StatPath(p)
+	pathInfo, err := ioutil.StatPath(p, args.Path)
 	if err != nil {
 		return nil, err
 	}

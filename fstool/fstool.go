@@ -4,26 +4,15 @@ import (
 	"context"
 	"sync"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
-// fsToolPolicy centralizes sandbox/path policy for this tool instance.
-type fsToolPolicy struct {
+type fsToolConfig struct {
 	allowedRoots  []string
 	workBaseDir   string
 	blockSymlinks bool
-}
-
-// Clone returns an independent copy of the policy.
-func (p *fsToolPolicy) Clone() *fsToolPolicy {
-	if p == nil {
-		return nil
-	}
-	cp := *p
-	cp.allowedRoots = append([]string(nil), p.allowedRoots...)
-	return &cp
 }
 
 // FSTool is an instance-owned filesystem tool runner.
@@ -32,8 +21,9 @@ func (p *fsToolPolicy) Clone() *fsToolPolicy {
 //   - allowedRoots: optional restriction; if empty, allow all
 //   - blockSymlinks: blocks symlink traversal (enforced downstream).
 type FSTool struct {
-	mu         sync.RWMutex
-	toolPolicy *fsToolPolicy
+	mu     sync.RWMutex
+	cfg    fsToolConfig
+	policy fspolicy.FSPolicy
 }
 
 type FSToolOption func(*FSTool) error
@@ -42,10 +32,7 @@ type FSToolOption func(*FSTool) error
 // Roots are canonicalized (clean+abs+best-effort symlink eval) and must exist as directories.
 func WithAllowedRoots(roots []string) FSToolOption {
 	return func(ft *FSTool) error {
-		if ft.toolPolicy == nil {
-			ft.toolPolicy = &fsToolPolicy{}
-		}
-		ft.toolPolicy.allowedRoots = roots
+		ft.cfg.allowedRoots = roots
 		return nil
 	}
 }
@@ -54,10 +41,7 @@ func WithAllowedRoots(roots []string) FSToolOption {
 // If empty/whitespace, NewFSTool will pick an effective default (via InitPathPolicy).
 func WithWorkBaseDir(base string) FSToolOption {
 	return func(ft *FSTool) error {
-		if ft.toolPolicy == nil {
-			ft.toolPolicy = &fsToolPolicy{}
-		}
-		ft.toolPolicy.workBaseDir = base
+		ft.cfg.workBaseDir = base
 		return nil
 	}
 }
@@ -65,17 +49,14 @@ func WithWorkBaseDir(base string) FSToolOption {
 // WithBlockSymlinks configures whether symlink traversal should be blocked (if supported downstream).
 func WithBlockSymlinks(block bool) FSToolOption {
 	return func(ft *FSTool) error {
-		if ft.toolPolicy == nil {
-			ft.toolPolicy = &fsToolPolicy{}
-		}
-		ft.toolPolicy.blockSymlinks = block
+		ft.cfg.blockSymlinks = block
 		return nil
 	}
 }
 
 func NewFSTool(opts ...FSToolOption) (*FSTool, error) {
 	ft := &FSTool{
-		toolPolicy: &fsToolPolicy{
+		cfg: fsToolConfig{
 			allowedRoots:  nil,
 			workBaseDir:   "",
 			blockSymlinks: false,
@@ -91,17 +72,11 @@ func NewFSTool(opts ...FSToolOption) (*FSTool, error) {
 		}
 	}
 
-	// Canonicalize/initialize path policy.
-	eff, roots, err := fileutil.InitPathPolicy(ft.toolPolicy.workBaseDir, ft.toolPolicy.allowedRoots)
+	pol, err := fspolicy.New(ft.cfg.workBaseDir, ft.cfg.allowedRoots, ft.cfg.blockSymlinks)
 	if err != nil {
 		return nil, err
 	}
-
-	ft.toolPolicy = &fsToolPolicy{
-		allowedRoots:  roots,
-		workBaseDir:   eff,
-		blockSymlinks: ft.toolPolicy.blockSymlinks,
-	}
+	ft.policy = pol
 
 	return ft, nil
 }
@@ -118,28 +93,28 @@ func (ft *FSTool) WriteFileTool() spec.Tool        { return toolutil.CloneTool(w
 func (ft *FSTool) DeleteFile(ctx context.Context, args DeleteFileArgs) (*DeleteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*DeleteFileOut, error) {
 		p := ft.snapshotPolicy()
-		return deleteFile(ctx, args, *p)
+		return deleteFile(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) ListDirectory(ctx context.Context, args ListDirectoryArgs) (*ListDirectoryOut, error) {
 	return toolutil.WithRecoveryResp(func() (*ListDirectoryOut, error) {
 		p := ft.snapshotPolicy()
-		return listDirectory(ctx, args, *p)
+		return listDirectory(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) MIMEForExtension(ctx context.Context, args MIMEForExtensionArgs) (*MIMEForExtensionOut, error) {
 	return toolutil.WithRecoveryResp(func() (*MIMEForExtensionOut, error) {
 		p := ft.snapshotPolicy()
-		return mimeForExtension(ctx, args, *p)
+		return mimeForExtension(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) MIMEForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEForPathOut, error) {
 	return toolutil.WithRecoveryResp(func() (*MIMEForPathOut, error) {
 		p := ft.snapshotPolicy()
-		return mimeForPath(ctx, args, *p)
+		return mimeForPath(ctx, args, p)
 	})
 }
 
@@ -149,38 +124,34 @@ func (ft *FSTool) ReadFile(
 ) ([]spec.ToolStoreOutputUnion, error) {
 	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
 		p := ft.snapshotPolicy()
-		return readFile(ctx, args, *p)
+		return readFile(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) SearchFiles(ctx context.Context, args SearchFilesArgs) (*SearchFilesOut, error) {
 	return toolutil.WithRecoveryResp(func() (*SearchFilesOut, error) {
 		p := ft.snapshotPolicy()
-		return searchFiles(ctx, args, *p)
+		return searchFiles(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) StatPath(ctx context.Context, args StatPathArgs) (*StatPathOut, error) {
 	return toolutil.WithRecoveryResp(func() (*StatPathOut, error) {
 		p := ft.snapshotPolicy()
-		return statPath(ctx, args, *p)
+		return statPath(ctx, args, p)
 	})
 }
 
 func (ft *FSTool) WriteFile(ctx context.Context, args WriteFileArgs) (*WriteFileOut, error) {
 	return toolutil.WithRecoveryResp(func() (*WriteFileOut, error) {
 		p := ft.snapshotPolicy()
-		return writeFile(ctx, args, *p)
+		return writeFile(ctx, args, p)
 	})
 }
 
-func (ft *FSTool) snapshotPolicy() *fsToolPolicy {
+func (ft *FSTool) snapshotPolicy() fspolicy.FSPolicy {
 	ft.mu.RLock()
-	p := ft.toolPolicy
+	p := ft.policy
 	ft.mu.RUnlock()
-
-	if p == nil {
-		return nil
-	}
-	return p.Clone()
+	return p
 }

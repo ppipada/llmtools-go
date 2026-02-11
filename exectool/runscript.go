@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -271,8 +270,7 @@ func runScript(
 		return nil, err
 	}
 
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
+	fsPol := tp.fsPolicy
 	defaultExecPol := tp.executionPolicy
 	blocked := tp.blockedCommands
 	pol := tp.runScriptPolicy
@@ -281,16 +279,12 @@ func runScript(
 	if reqPath == "" {
 		return nil, errors.New("path is required")
 	}
-	// WorkDir: absolute or relative; default to workBaseDir.
-	workdirAbs, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.WorkDir, workBaseDir)
+	// WorkDir: absolute or relative; default to policy work base dir.
+	workdirAbs, err := fsPol.ResolvePath(args.WorkDir, fsPol.WorkBaseDir())
 	if err != nil {
 		return nil, err
 	}
-	workdirAbs, err = fileutil.GetEffectiveWorkDir(workdirAbs, allowedRoots)
-	if err != nil {
-		return nil, err
-	}
-	if err := fileutil.VerifyDirNoSymlink(workdirAbs); err != nil {
+	if err := fsPol.VerifyDirResolved(workdirAbs); err != nil {
 		return nil, err
 	}
 
@@ -298,17 +292,17 @@ func runScript(
 	// - relative => workBaseDir
 	// - absolute => must still be within allowedRoots (if configured).
 	// If relative and workdir provided, resolve relative to workdir.
-	baseForScript := workBaseDir
+	scriptInput := reqPath
 	if strings.TrimSpace(args.WorkDir) != "" && !filepath.IsAbs(reqPath) {
-		baseForScript = workdirAbs
+		scriptInput = filepath.Join(workdirAbs, reqPath)
 	}
-	scriptAbs, err := fileutil.ResolvePath(baseForScript, allowedRoots, reqPath, "")
+	scriptAbs, err := fsPol.ResolvePath(scriptInput, "")
 	if err != nil {
 		return nil, err
 	}
 
 	// Require existing, regular, non-symlink file and refuse symlink traversal in parents.
-	if _, err := fileutil.RequireExistingRegularFileNoSymlink(scriptAbs); err != nil {
+	if _, err := fsPol.RequireExistingRegularFileResolved(scriptAbs); err != nil {
 		return nil, err
 	}
 

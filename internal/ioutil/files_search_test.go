@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"context"
@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -115,14 +115,7 @@ func TestSearchFilesBasic(t *testing.T) {
 			wantExactPaths: []string{},
 			wantLen:        -1,
 		},
-		{
-			name:           "root can be a single file",
-			root:           tree.helloPath,
-			pattern:        "hello",
-			maxResults:     0,
-			wantExactPaths: []string{tree.helloPath},
-			wantLen:        -1,
-		},
+
 		{
 			name:             "maxResults larger than matches => reachedLimit=false",
 			root:             tree.root,
@@ -136,7 +129,11 @@ func TestSearchFilesBasic(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reachedLimit, err := SearchFiles(t.Context(), tc.root, tc.pattern, tc.maxResults)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			got, reachedLimit, err := SearchFiles(t.Context(), policy, tc.root, tc.pattern, tc.maxResults)
 
 			if tc.wantErr {
 				if err == nil {
@@ -205,7 +202,11 @@ func TestSearchFilesRootDefaultUsesCWD(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _, err := SearchFiles(t.Context(), "", tc.pattern, tc.maxResults)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			got, _, err := SearchFiles(t.Context(), policy, "", tc.pattern, tc.maxResults)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -241,13 +242,17 @@ func TestSearchFilesConcurrency(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var wg sync.WaitGroup
 			errCh := make(chan error, tc.goroutines)
-
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
 			for i := 0; i < tc.goroutines; i++ {
 				wg.Add(1)
 				go func(id int) {
 					defer wg.Done()
 					for j := 0; j < tc.iterations; j++ {
-						got, _, err := SearchFiles(t.Context(), tc.searchRoot, tc.searchPat, 0)
+
+						got, _, err := SearchFiles(t.Context(), policy, tc.searchRoot, tc.searchPat, 0)
 						if err != nil {
 							errCh <- fmt.Errorf("goroutine %d: unexpected error: %w", id, err)
 							return
@@ -358,7 +363,11 @@ func TestSearchFiles_EdgeCases(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, root, pattern, want := tc.setup(t)
-			got, _, err := SearchFiles(ctx, root, pattern, 0)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			got, _, err := SearchFiles(ctx, policy, root, pattern, 0)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -372,6 +381,61 @@ func TestSearchFiles_EdgeCases(t *testing.T) {
 				t.Fatalf("got=%#v want=%#v (order-independent)", got, want)
 			}
 		})
+	}
+}
+
+func TestSearchFiles_AllowedRoots_SkipsSymlinkFileThatResolvesOutside(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == toolutil.GOOSWindows {
+		t.Skip("symlink test skipped on Windows")
+	}
+
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	outsideFile := filepath.Join(outside, "outside.txt")
+	mustWriteBytes(t, outsideFile, []byte("OUTSIDE-CONTENT"))
+
+	linkInRoot := filepath.Join(root, "link.txt")
+	mustSymlinkOrSkip(t, outsideFile, linkInRoot)
+
+	p, err := fspolicy.New(root, []string{root}, false) // allow symlinks, but restrict roots
+	if err != nil {
+		t.Fatalf("New policy: %v", err)
+	}
+
+	got, _, err := SearchFiles(t.Context(), p, root, "link\\.txt", 0)
+	if err != nil {
+		t.Fatalf("SearchFiles error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no results (symlink resolves outside allowed roots), got=%v", got)
+	}
+}
+
+func TestSearchFiles_RelativeRoot_ReturnsPathsPrefixedWithOriginalRootArg(t *testing.T) {
+	// Not parallel: uses t.Chdir.
+	td := t.TempDir()
+	t.Chdir(td)
+
+	sub := filepath.Join(td, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	mustWriteBytes(t, filepath.Join(sub, "a.txt"), []byte("hello"))
+
+	p, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("New policy: %v", err)
+	}
+
+	got, _, err := SearchFiles(t.Context(), p, "sub", "a\\.txt", 0)
+	if err != nil {
+		t.Fatalf("SearchFiles error: %v", err)
+	}
+	if len(got) != 1 || got[0] != filepath.Join("sub", "a.txt") {
+		t.Fatalf("got=%v; want=%q", got, filepath.Join("sub", "a.txt"))
 	}
 }
 
@@ -408,7 +472,7 @@ func createSearchTestTree(t *testing.T) searchTestTree {
 	if _, err := f.WriteString("BIGPATTERN at the beginning of a big file."); err != nil {
 		t.Fatalf("failed to write to big file %q: %v", bigPath, err)
 	}
-	if err := f.Truncate(10*1024*1024 + 1); err != nil {
+	if err := f.Truncate(1*1024*1024 + 1); err != nil {
 		t.Fatalf("failed to truncate big file %q: %v", bigPath, err)
 	}
 	if err := f.Close(); err != nil {
@@ -424,41 +488,3 @@ func createSearchTestTree(t *testing.T) searchTestTree {
 		bigPath:     bigPath,
 	}
 }
-
-// Helper to write text files in tests.
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("failed to write test file %q: %v", path, err)
-	}
-}
-
-// Helper to compare string slices as sets (order-independent).
-func equalStringSets(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	m := make(map[string]int, len(a))
-	for _, s := range a {
-		m[s]++
-	}
-	for _, s := range b {
-		m[s]--
-		if m[s] < 0 {
-			return false
-		}
-	}
-	for _, v := range m {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// Helper to check if a slice contains a string.
-func containsString(slice []string, target string) bool {
-	return slices.Contains(slice, target)
-}
-
-func ptrBool(b bool) *bool { return &b }

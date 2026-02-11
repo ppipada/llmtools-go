@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -102,21 +103,14 @@ type ReplaceTextLinesOut struct {
 func replaceTextLines(
 	ctx context.Context,
 	args ReplaceTextLinesArgs,
-	tp textToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*ReplaceTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
-
-	matchLines := fileutil.NormalizeLineBlockInput(args.MatchLines)
-	beforeLines := fileutil.NormalizeLineBlockInput(args.BeforeLines)
-	afterLines := fileutil.NormalizeLineBlockInput(args.AfterLines)
+	matchLines := ioutil.NormalizeLineBlockInput(args.MatchLines)
+	beforeLines := ioutil.NormalizeLineBlockInput(args.BeforeLines)
+	afterLines := ioutil.NormalizeLineBlockInput(args.AfterLines)
 
 	if len(matchLines) == 0 {
 		return nil, errors.New("matchLines is required")
@@ -125,7 +119,7 @@ func replaceTextLines(
 	if args.ReplaceWithLines == nil {
 		return nil, errors.New("replaceWithLines is required")
 	}
-	replaceWith := fileutil.NormalizeLineBlockInput(args.ReplaceWithLines)
+	replaceWith := ioutil.NormalizeLineBlockInput(args.ReplaceWithLines)
 	if len(replaceWith) == 0 {
 		return nil, errors.New(
 			"replaceWithLines must contain at least one line (deletion is not supported by this tool)",
@@ -140,15 +134,14 @@ func replaceTextLines(
 		return nil, fmt.Errorf("expectedReplacements must be >= 1 (got %d)", expected)
 	}
 
-	tf, err := fileutil.ReadTextFileUTF8(path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	matchIdxs := fileutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeLines, matchLines, afterLines)
-
+	matchIdxs := ioutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeLines, matchLines, afterLines)
 	// Overlap guard: overlapping matches make replacements ambiguous.
-	if err := fileutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
+	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
 		return nil, err
 	}
 
@@ -171,7 +164,7 @@ func replaceTextLines(
 	}
 
 	outStr := tf.Render()
-	if err := fileutil.WriteFileAtomicBytes(tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
 		return nil, err
 	}
 

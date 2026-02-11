@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"errors"
@@ -8,10 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 var (
-	ErrInvalidPath      = errors.New("invalid path")
+	// ErrInvalidPath is shared with policy to keep behavior consistent.
+	ErrInvalidPath      = fspolicy.ErrInvalidPath
+	ErrInvalidDir       = errors.New("invalid dir")
 	ErrUnknownExtension = errors.New("unknown extension")
 )
 
@@ -135,7 +139,6 @@ const (
 )
 
 // ExtensionToMIMEType is an internal registry of common/explicitly-supported extensions.
-// This is used before falling back to mime.TypeByExtension.
 var ExtensionToMIMEType = map[FileExt]MIMEType{
 	ExtTxt:      MIMETextPlain,
 	ExtMd:       MIMETextMarkdown,
@@ -201,7 +204,7 @@ var ExtensionToMIMEType = map[FileExt]MIMEType{
 	ExtODS:  MIMEApplicationODS,
 }
 
-// BaseMIMEToMode maps *base mime types* (no parameters) to a coarse mode.
+// BaseMIMEToMode maps base mime types (no parameters) to a coarse mode.
 var BaseMIMEToMode = map[string]ExtensionMode{
 	"":                         ExtensionModeDefault,
 	"application/octet-stream": ExtensionModeDefault,
@@ -239,7 +242,6 @@ var BaseMIMEToMode = map[string]ExtensionMode{
 	"application/vnd.oasis.opendocument.spreadsheet":                            ExtensionModeDocument,
 }
 
-// ModeToExtensions is a convenience reverse index built from ExtensionToMIMEType + BaseMIMEToMode.
 var ModeToExtensions = func() map[ExtensionMode][]FileExt {
 	m := make(map[ExtensionMode][]FileExt, len(AllExtensionModes))
 	for ext, mt := range ExtensionToMIMEType {
@@ -249,8 +251,6 @@ var ModeToExtensions = func() map[ExtensionMode][]FileExt {
 	return m
 }()
 
-// MIMEDetectMethod describes how MIME detection was performed.
-// It is intentionally coarse (extension vs sniff).
 type MIMEDetectMethod string
 
 const (
@@ -258,19 +258,7 @@ const (
 	MIMEDetectMethodSniff     MIMEDetectMethod = "sniff"
 )
 
-// MIMEForLocalFile returns a best-effort MIME type, "file mode" (text/image/document/default) and detection method.
-//
-// Behavior:
-//   - First try extension-based detection (internal registry + stdlib).
-//   - If extension detection is unknown or generic, sniff the file bytes.
-//   - Sniffing uses DetectContentType + a small "isProbablyTextSample" heuristic.
-//
-// Detection method can be:
-//   - extension: a non-generic MIME type was derived from the file extension (no file IO required)
-//   - sniff: content sniffing was used (requires opening/reading the file)
-func MIMEForLocalFile(
-	path string,
-) (mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
+func MIMEForLocalFile(path string) (mimeType MIMEType, mode ExtensionMode, method MIMEDetectMethod, err error) {
 	if strings.TrimSpace(path) == "" {
 		return MIMEEmpty, ExtensionModeDefault, MIMEDetectMethodSniff, ErrInvalidPath
 	}
@@ -278,19 +266,12 @@ func MIMEForLocalFile(
 	ext := filepath.Ext(path)
 	if ext != "" {
 		mt, e := MIMEFromExtensionString(ext)
-
 		if e == nil && mt != MIMEEmpty && GetBaseMIME(mt) != string(MIMEApplicationOctetStream) {
 			m := GetModeForMIME(mt)
-			// Only trust extension-derived MIME if it yields a useful mode.
-			// Some platforms map unknown text formats to application/x-*, which would otherwise
-			// short-circuit sniffing and incorrectly classify readable text as "default".
 			if m != ExtensionModeDefault {
 				return mt, m, MIMEDetectMethodExtension, nil
 			}
-			// else: fall through to sniff
 		}
-
-		// Unknown or generic => sniff.
 	}
 
 	mt, m, e := SniffFileMIME(path)
@@ -300,11 +281,6 @@ func MIMEForLocalFile(
 	return mt, m, MIMEDetectMethodSniff, nil
 }
 
-// MIMEFromExtensionString returns a best-known MIME for the given extension string.
-// Accepts "png" as well as ".png" (useful because image.DecodeConfig returns "png").
-//
-// Lookup order: internal registry -> stdlib mime.TypeByExtension.
-// If the extension cannot be resolved, returns application/octet-stream and ErrUnknownExtension.
 func MIMEFromExtensionString(ext string) (MIMEType, error) {
 	if strings.TrimSpace(ext) == "" {
 		return MIMEEmpty, ErrInvalidPath
@@ -319,7 +295,6 @@ func MIMEFromExtensionString(ext string) (MIMEType, error) {
 		return mt, nil
 	}
 
-	// Fall back to stdlib mapping.
 	if t := mime.TypeByExtension(string(e)); t != "" {
 		return MIMEType(t), nil
 	}
@@ -327,8 +302,6 @@ func MIMEFromExtensionString(ext string) (MIMEType, error) {
 	return MIMEApplicationOctetStream, ErrUnknownExtension
 }
 
-// SniffFileMIME inspects initial bytes of a file and returns a best-effort
-// MIME type and mode. It will return an error if the file can't be opened/read.
 func SniffFileMIME(path string) (MIMEType, ExtensionMode, error) {
 	if strings.TrimSpace(path) == "" {
 		return MIMEEmpty, ExtensionModeDefault, ErrInvalidPath
@@ -354,22 +327,18 @@ func SniffFileMIME(path string) (MIMEType, ExtensionMode, error) {
 	mt := MIMEType(http.DetectContentType(sample))
 	m := GetModeForMIME(mt)
 
-	// If DetectContentType gave us a strong signal (text/image/document), trust it.
 	if m != ExtensionModeDefault {
 		return mt, m, nil
 	}
 
-	// Only for "default/unknown" do we apply the text heuristic.
 	if isProbablyTextSample(sample) {
 		return MIMETextPlain, ExtensionModeText, nil
 	}
 
-	// Normalize generic/empty to octet-stream.
 	if GetBaseMIME(mt) == string(MIMEApplicationOctetStream) || mt == MIMEEmpty {
 		return MIMEApplicationOctetStream, ExtensionModeDefault, nil
 	}
 
-	// Otherwise return the unknown MIME with default mode.
 	return mt, ExtensionModeDefault, nil
 }
 
@@ -379,7 +348,6 @@ func GetModeForMIME(mt MIMEType) ExtensionMode {
 		return m
 	}
 
-	// Heuristics for unknown but structured text-like types.
 	switch {
 	case strings.HasPrefix(base, "text/"):
 		return ExtensionModeText
@@ -387,7 +355,6 @@ func GetModeForMIME(mt MIMEType) ExtensionMode {
 		return ExtensionModeImage
 	}
 
-	// Structured suffixes like application/vnd.foo+json.
 	if strings.HasSuffix(base, "+json") || strings.HasSuffix(base, "+xml") {
 		return ExtensionModeText
 	}
@@ -400,14 +367,12 @@ func GetBaseMIME(mt MIMEType) string {
 	if s == "" {
 		return ""
 	}
-	// Drop parameters like "; charset=utf-8".
 	if i := strings.IndexByte(s, ';'); i >= 0 {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
 }
 
-// GetNormalizedExt lowercases and ensures a leading '.' for an extension.
 func GetNormalizedExt(ext string) FileExt {
 	e := strings.TrimSpace(ext)
 	if e == "" {
@@ -419,8 +384,6 @@ func GetNormalizedExt(ext string) FileExt {
 	return FileExt(strings.ToLower(e))
 }
 
-// isProbablyTextSample returns true if the byte sample looks like text.
-// Heuristic: disallow NULs and too many control bytes (except \t, \n, \r).
 func isProbablyTextSample(p []byte) bool {
 	if len(p) == 0 {
 		return true
@@ -439,6 +402,5 @@ func isProbablyTextSample(p []byte) bool {
 	if nulCount > 0 {
 		return false
 	}
-	// If >10% bytes are control chars, assume binary.
 	return controlCount*10 <= len(p)
 }

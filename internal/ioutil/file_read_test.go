@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"encoding/base64"
@@ -58,6 +58,20 @@ func TestReadFile(t *testing.T) {
 		{
 			name:            "empty path",
 			path:            "",
+			encoding:        ReadEncodingText,
+			wantErr:         true,
+			wantErrContains: ErrInvalidPath.Error(),
+		},
+		{
+			name:            "whitespace-only path",
+			path:            "   ",
+			encoding:        ReadEncodingText,
+			wantErr:         true,
+			wantErrContains: ErrInvalidPath.Error(),
+		},
+		{
+			name:            "nul byte path",
+			path:            "a\x00b",
 			encoding:        ReadEncodingText,
 			wantErr:         true,
 			wantErrContains: ErrInvalidPath.Error(),

@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -158,7 +159,11 @@ func TestReadImage(t *testing.T) {
 			if tc.SkipWin && runtime.GOOS == toolutil.GOOSWindows {
 				t.Skip("not testing for windows")
 			}
-			out, err := ReadImage(tc.path, tc.includeB64, tc.maxBytes)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			out, err := ReadImage(policy, tc.path, tc.includeB64, tc.maxBytes)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (out=%+v)", out)

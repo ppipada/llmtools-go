@@ -5,11 +5,16 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestInsertTextLines_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	type want struct {
 		content            string
 		insertedAtLine     int
@@ -155,7 +160,7 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "insert-*.txt", tt.initial)
 			tt.args.Path = path
 
-			out, err := insertTextLines(t.Context(), tt.args, textToolPolicy{})
+			out, err := insertTextLines(t.Context(), tt.args, policy)
 			mustNoErr(t, err)
 
 			got := readFileString(t, path)
@@ -192,7 +197,10 @@ func TestInsertTextLines_HappyPaths(t *testing.T) {
 
 func TestInsertTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name              string
 		setupFile         func() string
@@ -327,7 +335,7 @@ func TestInsertTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := insertTextLines(ctx, args, textToolPolicy{})
+			_, err := insertTextLines(ctx, args, policy)
 			if strings.Contains(tt.name, "context_canceled") {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

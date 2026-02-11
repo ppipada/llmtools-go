@@ -2,134 +2,274 @@ package fstool
 
 import (
 	"context"
-	"errors"
-	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"testing"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
-// TestSearchFiles covers happy, error, and boundary cases for SearchFiles.
 func TestSearchFiles(t *testing.T) {
-	tmpDir := t.TempDir()
+	type cfg struct {
+		workBaseDir   string
+		allowedRoots  []string
+		blockSymlinks bool
+	}
 
-	if err := os.WriteFile(filepath.Join(tmpDir, "foo.txt"), []byte("hello world"), 0o600); err != nil {
-		t.Fatalf("write foo.txt: %v", err)
+	makeTool := func(t *testing.T, c cfg) *FSTool {
+		t.Helper()
+		opts := []FSToolOption{WithWorkBaseDir(c.workBaseDir), WithBlockSymlinks(c.blockSymlinks)}
+		if c.allowedRoots != nil {
+			opts = append(opts, WithAllowedRoots(c.allowedRoots))
+		}
+		return mustNewFSTool(t, opts...)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "bar.md"), []byte("goodbye world"), 0o600); err != nil {
-		t.Fatalf("write bar.md: %v", err)
-	}
-	if err := os.Mkdir(filepath.Join(tmpDir, "sub"), 0o755); err != nil {
-		t.Fatalf("mkdir sub: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "sub", "baz.txt"), []byte("baz content"), 0o600); err != nil {
-		t.Fatalf("write baz.txt: %v", err)
+
+	seedTree := func(t *testing.T, root string) {
+		t.Helper()
+		mustWriteFile(t, filepath.Join(root, "foo.txt"), []byte("hello world"))
+		mustWriteFile(t, filepath.Join(root, "bar.md"), []byte("goodbye world"))
+		mustMkdirAll(t, filepath.Join(root, "sub"))
+		mustWriteFile(t, filepath.Join(root, "sub", "baz.txt"), []byte("baz content"))
 	}
 
 	tests := []struct {
-		name string
-		args SearchFilesArgs
-		ctx  func(t *testing.T) context.Context
+		name    string
+		cfg     func(t *testing.T) cfg
+		ctx     func(t *testing.T) context.Context
+		args    func(t *testing.T, c cfg) SearchFilesArgs
+		wantErr func(error) bool
 
-		want           []string
-		wantErr        bool
-		shouldFind     func([]string) bool
-		wantReachedMax bool
+		wantMatches       []string
+		wantReachedMax    bool
+		wantMatchCountLen bool
 	}{
 		{
 			name: "context_canceled",
-			ctx: func(t *testing.T) context.Context {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				ctx, cancel := context.WithCancel(t.Context())
-				cancel()
-				return ctx
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
 			},
-			args:    SearchFilesArgs{Root: tmpDir, Pattern: "txt"},
-			wantErr: true,
-		},
-		{
-			name:    "Missing pattern returns error",
-			args:    SearchFilesArgs{Root: tmpDir},
-			wantErr: true,
-		},
-		{
-			name:    "Invalid regexp returns error",
-			args:    SearchFilesArgs{Root: tmpDir, Pattern: "["},
-			wantErr: true,
-		},
-		{
-			name: "Match file path",
-			args: SearchFilesArgs{Root: tmpDir, Pattern: "foo\\.txt"},
-			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "foo.txt")},
-		},
-		{
-			name: "Match file content",
-			args: SearchFilesArgs{Root: tmpDir, Pattern: "goodbye"},
-			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "bar.md")},
-		},
-		{
-			name: "Match in subdirectory",
-			args: SearchFilesArgs{Root: tmpDir, Pattern: "baz"},
-			want: []string{filepath.Join(fileutil.ApplyDarwinSystemRootAliases(tmpDir), "sub", "baz.txt")},
-		},
-		{
-			name: "MaxResults limits output",
-			args: SearchFilesArgs{Root: tmpDir, Pattern: "txt", MaxResults: 1},
-			shouldFind: func(matches []string) bool {
-				return len(matches) == 1 && strings.HasSuffix(matches[0], ".txt")
+			ctx: canceledContext,
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: "txt"}
 			},
-			wantReachedMax: true,
+			wantErr: wantErrIs(context.Canceled),
+		},
+		{
+			name: "missing_pattern_errors",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: "."}
+			},
+			wantErr: wantErrContains("pattern is required"),
+		},
+		{
+			name: "invalid_regexp_errors",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: "["}
+			},
+			wantErr: wantErrAny,
+		},
+		{
+			name: "match_file_path_relative_root",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `foo\.txt`}
+			},
+			wantErr:           wantErrNone,
+			wantMatches:       []string{"foo.txt"},
+			wantMatchCountLen: true,
+		},
+		{
+			name: "match_file_content",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `goodbye`}
+			},
+			wantErr:           wantErrNone,
+			wantMatches:       []string{"bar.md"},
+			wantMatchCountLen: true,
+		},
+		{
+			name: "match_in_subdirectory",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `baz`}
+			},
+			wantErr:           wantErrNone,
+			wantMatches:       []string{filepath.Join("sub", "baz.txt")},
+			wantMatchCountLen: true,
+		},
+		{
+			name: "max_results_limits_output",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `txt`, MaxResults: 1}
+			},
+			wantErr:           wantErrNone,
+			wantReachedMax:    true,
+			wantMatchCountLen: true,
+		},
+		{
+			name: "blockSymlinks_true_skips_symlink_entries",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+
+				target := filepath.Join(tmp, "foo.txt")
+				link := filepath.Join(tmp, "link.txt")
+				mustSymlinkOrSkip(t, target, link)
+
+				return cfg{workBaseDir: tmp, blockSymlinks: true}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `link\.txt`}
+			},
+			wantErr:           wantErrNone,
+			wantMatches:       []string{}, // should skip symlink
+			wantMatchCountLen: true,
+		},
+		{
+			name: "allowedRoots_prevents_symlink_escape_even_when_symlinks_allowed",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				root := t.TempDir()
+				seedTree(t, root)
+
+				outside := t.TempDir()
+				outsideFile := filepath.Join(outside, "outside.txt")
+				mustWriteFile(t, outsideFile, []byte("needle outside root"))
+
+				link := filepath.Join(root, "escape.txt")
+				mustSymlinkOrSkip(t, outsideFile, link)
+
+				return cfg{workBaseDir: root, allowedRoots: []string{root}, blockSymlinks: false}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: ".", Pattern: `needle`}
+			},
+			wantErr:           wantErrNone,
+			wantMatches:       []string{}, // escaped symlink should be skipped by per-file ResolvePath check
+			wantMatchCountLen: true,
+		},
+		{
+			name: "root_is_file_errors",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				seedTree(t, tmp)
+				mustWriteFile(t, filepath.Join(tmp, "notadir"), []byte("x"))
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				return SearchFilesArgs{Root: "notadir", Pattern: "x"}
+			},
+			wantErr: wantErrAny,
+		},
+		{
+			name: "allowedRoots_blocks_outside_root_arg",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				root := t.TempDir()
+				seedTree(t, root)
+				return cfg{workBaseDir: root, allowedRoots: []string{root}}
+			},
+			args: func(t *testing.T, c cfg) SearchFilesArgs {
+				t.Helper()
+				outside := t.TempDir()
+				seedTree(t, outside)
+				return SearchFilesArgs{Root: outside, Pattern: "txt"}
+			},
+			wantErr: wantErrContains("outside allowed roots"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			c := tt.cfg(t)
+			ft := makeTool(t, c)
+
 			ctx := t.Context()
 			if tt.ctx != nil {
 				ctx = tt.ctx(t)
 			}
-			out, err := searchFiles(ctx, tt.args, fsToolPolicy{})
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("SearchFiles error = %v, wantErr = %v", err, tt.wantErr)
+
+			out, err := ft.SearchFiles(ctx, tt.args(t, c))
+			if tt.wantErr == nil {
+				tt.wantErr = wantErrNone
+			}
+			if !tt.wantErr(err) {
+				t.Fatalf("err=%v did not match expectation", err)
 			}
 			if err != nil {
-				if tt.name == "context_canceled" && !errors.Is(err, context.Canceled) {
-					t.Fatalf("expected context.Canceled, got %v", err)
-				}
 				return
 			}
-			if out.MatchCount != len(out.Matches) {
+			if out == nil {
+				t.Fatalf("expected non-nil out")
+			}
+
+			if tt.wantMatchCountLen && out.MatchCount != len(out.Matches) {
 				t.Fatalf("MatchCount=%d want %d", out.MatchCount, len(out.Matches))
 			}
 			if out.ReachedMaxResults != tt.wantReachedMax {
-				t.Fatalf("ReachedMaxResults=%v want %v", out.ReachedMaxResults, tt.wantReachedMax)
+				t.Fatalf("ReachedMaxResults=%v want=%v", out.ReachedMaxResults, tt.wantReachedMax)
 			}
-			if tt.shouldFind != nil {
-				if !tt.shouldFind(out.Matches) {
-					t.Errorf("custom predicate failed for matches: %v", out.Matches)
+
+			if tt.wantMatches != nil {
+				if !equalStringMultisets(out.Matches, tt.wantMatches) {
+					t.Fatalf("Matches=%v want=%v", out.Matches, tt.wantMatches)
 				}
-				return
-			}
-			if tt.want == nil {
-				return
-			}
-			wantMap := make(map[string]bool)
-			for _, w := range tt.want {
-				wantMap[w] = true
-			}
-			gotMap := make(map[string]bool)
-			for _, g := range out.Matches {
-				gotMap[g] = true
-			}
-			for w := range wantMap {
-				if !gotMap[w] {
-					t.Errorf("expected match %q not found in %v", w, out.Matches)
-				}
-			}
-			if len(out.Matches) != len(tt.want) {
-				t.Errorf("expected %d matches, got %d", len(tt.want), len(out.Matches))
 			}
 		})
 	}

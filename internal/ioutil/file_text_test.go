@@ -1,15 +1,13 @@
-package fileutil
+package ioutil
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/internal/toolutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestTextFile_Render(t *testing.T) {
@@ -135,7 +133,11 @@ func TestReadTextFileUTF8_Behavior(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tf, err := ReadTextFileUTF8(tc.path, tc.maxBytes)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			tf, err := ReadTextFileUTF8(policy, tc.path, tc.maxBytes)
 
 			if tc.wantErr != nil || tc.errContains != "" {
 				if err == nil {
@@ -170,64 +172,4 @@ func TestReadTextFileUTF8_Behavior(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestRequireExistingRegularFileNoSymlink_SymlinkCases(t *testing.T) {
-	if runtime.GOOS == toolutil.GOOSWindows {
-		t.Skip("symlink tests skipped on Windows")
-	}
-
-	root := t.TempDir()
-
-	realDir := filepath.Join(root, "realdir")
-	if err := os.Mkdir(realDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	realFile := filepath.Join(realDir, "f.txt")
-	mustWriteBytes(t, realFile, []byte("ok"))
-
-	t.Run("symlink file rejected", func(t *testing.T) {
-		linkFile := filepath.Join(root, "linkfile.txt")
-		mustSymlinkOrSkip(t, realFile, linkFile)
-
-		_, err := RequireExistingRegularFileNoSymlink(linkFile)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "symlink file") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("symlink parent component rejected", func(t *testing.T) {
-		linkDir := filepath.Join(root, "linkdir")
-		mustSymlinkOrSkip(t, realDir, linkDir)
-
-		_, err := RequireExistingRegularFileNoSymlink(filepath.Join(linkDir, "f.txt"))
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "symlink path component") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func equalStringSlices(a, b []string) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

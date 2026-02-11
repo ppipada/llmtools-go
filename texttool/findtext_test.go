@@ -6,12 +6,16 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestFindText_HappyPaths(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name        string
 		initial     string
@@ -226,7 +230,7 @@ func TestFindText_HappyPaths(t *testing.T) {
 			path := writeTempTextFile(t, dir, "find-*.txt", tt.initial)
 			args := tt.args(path)
 
-			out, err := findText(t.Context(), args, textToolPolicy{})
+			out, err := findText(t.Context(), args, policy)
 			mustNoErr(t, err)
 			if out.MatchesReturned != len(out.Matches) {
 				t.Fatalf("invariant failed: MatchesReturned=%d len(Matches)=%d", out.MatchesReturned, len(out.Matches))
@@ -246,7 +250,10 @@ func TestFindText_HappyPaths(t *testing.T) {
 
 func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name       string
 		setup      func(t *testing.T) string
@@ -516,7 +523,7 @@ func TestFindText_ErrorAndBoundaryCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := findText(ctx, args, textToolPolicy{})
+			_, err := findText(ctx, args, policy)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

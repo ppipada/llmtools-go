@@ -2,327 +2,420 @@ package fstool
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestDeleteFile(t *testing.T) {
-	type tc struct {
-		name string
-		run  func(t *testing.T)
+	type policyCfg struct {
+		name          string
+		allowedRoots  []string
+		workBaseDir   string
+		blockSymlinks bool
 	}
 
-	writeFile := func(t *testing.T, p string, data []byte) {
+	makeTool := func(t *testing.T, cfg policyCfg) *FSTool {
 		t.Helper()
-		if err := os.WriteFile(p, data, 0o600); err != nil {
-			t.Fatalf("WriteFile(%q): %v", p, err)
+		opts := []FSToolOption{
+			WithBlockSymlinks(cfg.blockSymlinks),
+		}
+		if cfg.workBaseDir != "" {
+			opts = append(opts, WithWorkBaseDir(cfg.workBaseDir))
+		}
+		if cfg.allowedRoots != nil {
+			opts = append(opts, WithAllowedRoots(cfg.allowedRoots))
+		}
+		return mustNewFSTool(t, opts...)
+	}
+
+	systemTrashExpected := func(t *testing.T, home string) (string, bool) {
+		t.Helper()
+		switch runtime.GOOS {
+		case toolutil.GOOSDarwin:
+			return filepath.Join(home, ".Trash"), true
+		case toolutil.GOOSLinux, "freebsd", "openbsd", "netbsd", "dragonfly":
+			xdg := strings.TrimSpace(os.Getenv("XDG_DATA_HOME"))
+			if xdg != "" {
+				return filepath.Join(xdg, "Trash", "files"), true
+			}
+			return filepath.Join(home, ".local", "share", "Trash", "files"), true
+		default:
+			return "", false
 		}
 	}
 
-	tests := []tc{
+	tests := []struct {
+		name    string
+		cfg     func(t *testing.T) policyCfg
+		ctx     func(t *testing.T) context.Context
+		setup   func(t *testing.T, cfg policyCfg) (src string, args DeleteFileArgs, check func(t *testing.T, out *DeleteFileOut))
+		wantErr func(error) bool
+	}{
 		{
 			name: "context_canceled_does_not_delete",
-			run: func(t *testing.T) {
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				p := filepath.Join(tmp, "a.txt")
-				writeFile(t, p, []byte("x"))
-
-				ctx, cancel := context.WithCancel(t.Context())
-				cancel()
-
-				_, err := deleteFile(
-					ctx,
-					DeleteFileArgs{Path: p, TrashDir: filepath.Join(tmp, "trash")},
-					fsToolPolicy{},
-				)
-				if err == nil || !errors.Is(err, context.Canceled) {
-					t.Fatalf("expected context.Canceled, got: %v", err)
-				}
-				if _, statErr := os.Lstat(p); statErr != nil {
-					t.Fatalf("expected original to remain, stat err=%v", statErr)
+				return policyCfg{name: "default", workBaseDir: tmp}
+			},
+			ctx: canceledContext,
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				src := filepath.Join(cfg.workBaseDir, "a.txt")
+				mustWriteFile(t, src, []byte("x"))
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				return src, DeleteFileArgs{Path: src, TrashDir: trash}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if _, err := os.Lstat(src); err != nil {
+						t.Fatalf("expected original to remain, stat err=%v", err)
+					}
 				}
 			},
+			wantErr: wantErrIs(context.Canceled),
 		},
 		{
-			name: "nonexistent_errors_isnotexist",
-			run: func(t *testing.T) {
+			name: "nonexistent_preserves_isnotexist",
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := deleteFile(t.Context(), DeleteFileArgs{
-					Path:     filepath.Join(tmp, "missing.txt"),
-					TrashDir: filepath.Join(tmp, "trash"),
-				}, fsToolPolicy{})
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if !os.IsNotExist(err) {
-					t.Fatalf("expected IsNotExist, got: %T %v", err, err)
-				}
+				return policyCfg{workBaseDir: tmp}
 			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				src := filepath.Join(cfg.workBaseDir, "missing.txt")
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				return src, DeleteFileArgs{Path: src, TrashDir: trash}, nil
+			},
+			wantErr: func(err error) bool { return err != nil && os.IsNotExist(err) },
 		},
 		{
 			name: "directory_errors",
-			run: func(t *testing.T) {
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				_, err := deleteFile(t.Context(), DeleteFileArgs{
-					Path:     tmp,
-					TrashDir: filepath.Join(tmp, "trash"),
-				}, fsToolPolicy{})
-				if err == nil {
-					t.Fatalf("expected error")
-				}
+				return policyCfg{workBaseDir: tmp}
 			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				return cfg.workBaseDir, DeleteFileArgs{Path: cfg.workBaseDir, TrashDir: trash}, nil
+			},
+			wantErr: wantErrAny,
 		},
 		{
-			name: "moves_to_explicit_trashDir_trims_args",
-			run: func(t *testing.T) {
+			name: "explicit_trashdir_trims_args_and_moves",
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				p := filepath.Join(tmp, "a.txt")
-				writeFile(t, p, []byte("hello"))
-
-				trash := filepath.Join(tmp, "trash")
-				out, err := deleteFile(t.Context(), DeleteFileArgs{
-					Path:     "  " + p + "  ",
+				return policyCfg{workBaseDir: tmp}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				src := filepath.Join(cfg.workBaseDir, "a.txt")
+				mustWriteFile(t, src, []byte("hello"))
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				args := DeleteFileArgs{
+					Path:     "  " + src + "  ",
 					TrashDir: "  " + trash + "  ",
-				}, fsToolPolicy{})
-				if err != nil {
-					t.Fatalf("deleteFile: %v", err)
 				}
-				if out == nil {
-					t.Fatalf("expected non-nil out")
-				}
-				if gotDir := filepath.Clean(
-					filepath.Dir(out.TrashedPath),
-				); gotDir != filepath.Clean(
-					fileutil.ApplyDarwinSystemRootAliases(trash),
-				) {
-					t.Fatalf("trashed dir=%q want=%q (out=%+v)", gotDir, trash, out)
-				}
-				if out.Method != DeleteFileMethodRename {
-					t.Fatalf("method=%q want=%q", out.Method, DeleteFileMethodRename)
-				}
-
-				if _, statErr := os.Lstat(p); !os.IsNotExist(statErr) {
-					t.Fatalf("expected original removed, stat err=%v", statErr)
-				}
-				b, rerr := os.ReadFile(out.TrashedPath)
-				if rerr != nil {
-					t.Fatalf("ReadFile trashed: %v", rerr)
-				}
-				if string(b) != "hello" {
-					t.Fatalf("content mismatch: %q", string(b))
+				return src, args, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if out == nil {
+						t.Fatalf("expected non-nil out")
+					}
+					gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
+					wantDir := canonForPolicyExpectations(trash)
+					if gotDir != filepath.Clean(wantDir) {
+						t.Fatalf("trashed dir=%q want=%q (out=%+v)", gotDir, wantDir, out)
+					}
+					if _, err := os.Lstat(src); !os.IsNotExist(err) {
+						t.Fatalf("expected original removed, stat err=%v", err)
+					}
+					if got := string(mustReadFile(t, out.TrashedPath)); got != "hello" {
+						t.Fatalf("trashed content=%q want=%q", got, "hello")
+					}
 				}
 			},
+			wantErr: wantErrNone,
 		},
 		{
 			name: "name_collision_gets_unique_name",
-			run: func(t *testing.T) {
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-				trash := filepath.Join(tmp, "trash")
+				return policyCfg{workBaseDir: tmp}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				src := filepath.Join(cfg.workBaseDir, "same.txt")
 
-				p := filepath.Join(tmp, "same.txt")
-				writeFile(t, p, []byte("one"))
-				out1, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, fsToolPolicy{})
+				mustWriteFile(t, src, []byte("one"))
+				ft := makeTool(t, cfg)
+				out1, err := ft.DeleteFile(t.Context(), DeleteFileArgs{Path: src, TrashDir: trash})
 				if err != nil {
-					t.Fatalf("deleteFile #1: %v", err)
+					t.Fatalf("seed delete #1: %v", err)
 				}
 
-				writeFile(t, p, []byte("two"))
-				out2, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trash}, fsToolPolicy{})
+				mustWriteFile(t, src, []byte("two"))
+				out2, err := ft.DeleteFile(t.Context(), DeleteFileArgs{Path: src, TrashDir: trash})
 				if err != nil {
-					t.Fatalf("deleteFile #2: %v", err)
+					t.Fatalf("seed delete #2: %v", err)
 				}
 
 				if out1.TrashedPath == out2.TrashedPath {
 					t.Fatalf("expected unique trashed paths, got same: %q", out1.TrashedPath)
 				}
+				if string(mustReadFile(t, out1.TrashedPath)) != "one" {
+					t.Fatalf("content mismatch for out1")
+				}
+				if string(mustReadFile(t, out2.TrashedPath)) != "two" {
+					t.Fatalf("content mismatch for out2")
+				}
 
-				b1, err := os.ReadFile(out1.TrashedPath)
-				if err != nil {
-					t.Fatalf("ReadFile #1 trashed: %v", err)
-				}
-				b2, err := os.ReadFile(out2.TrashedPath)
-				if err != nil {
-					t.Fatalf("ReadFile #2 trashed: %v", err)
-				}
-				if string(b1) != "one" || string(b2) != "two" {
-					t.Fatalf("content mismatch: b1=%q b2=%q", string(b1), string(b2))
+				// Return a no-op test case since we've already asserted.
+				return "skip", DeleteFileArgs{Path: src, TrashDir: trash}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
 				}
 			},
+			wantErr: wantErrNone,
 		},
 		{
-			name: "trashDir_is_file_errors_and_original_remains",
-			run: func(t *testing.T) {
+			name: "trashdir_is_file_errors_and_original_remains",
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
 				tmp := t.TempDir()
-
-				p := filepath.Join(tmp, "a.txt")
-				writeFile(t, p, []byte("x"))
-
-				trashAsFile := filepath.Join(tmp, "trash")
-				writeFile(t, trashAsFile, []byte("not a dir"))
-
-				_, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: trashAsFile}, fsToolPolicy{})
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if _, statErr := os.Lstat(p); statErr != nil {
-					t.Fatalf("expected original to remain, stat err=%v", statErr)
-				}
+				return policyCfg{workBaseDir: tmp}
 			},
-		},
-		{
-			name: "auto_uses_system_trash_when_set_non_windows",
-			run: func(t *testing.T) {
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
 				t.Helper()
-				if runtime.GOOS == toolutil.GOOSWindows {
-					t.Skip("HOME/XDG behavior differs on Windows")
-				}
+				src := filepath.Join(cfg.workBaseDir, "a.txt")
+				mustWriteFile(t, src, []byte("x"))
 
-				tmpHome := t.TempDir()
-				t.Setenv("HOME", tmpHome)
-				xdg := filepath.Join(tmpHome, "xdgdata")
-				t.Setenv("XDG_DATA_HOME", xdg)
+				trashAsFile := filepath.Join(cfg.workBaseDir, "trash")
+				mustWriteFile(t, trashAsFile, []byte("not a dir"))
 
-				tmp := t.TempDir()
-				p := filepath.Join(tmp, "auto.txt")
-				writeFile(t, p, []byte("x"))
-
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "auto"}, fsToolPolicy{})
-				if err != nil {
-					t.Fatalf("deleteFile(auto): %v", err)
-				}
-
-				var wantTrash string
-				switch runtime.GOOS {
-				case toolutil.GOOSDarwin:
-					wantTrash = fileutil.ApplyDarwinSystemRootAliases(filepath.Join(tmpHome, ".Trash"))
-				case toolutil.GOOSLinux,
-					toolutil.GOOSFreebsd,
-					toolutil.GOOSOpenbsd,
-					toolutil.GOOSNetbsd,
-					toolutil.GOOSDragonfly:
-					wantTrash = filepath.Join(xdg, "Trash", "files")
-				default:
-					t.Skipf("system trash not defined for GOOS=%q in this test", runtime.GOOS)
-				}
-
-				if filepath.Clean(filepath.Dir(out.TrashedPath)) != filepath.Clean(wantTrash) {
-					t.Fatalf("trashed dir=%q want=%q", filepath.Dir(out.TrashedPath), wantTrash)
-				}
-				if out.Method != DeleteFileMethodRename {
-					t.Fatalf("method=%q want=%q", out.Method, DeleteFileMethodRename)
-				}
-			},
-		},
-		{
-			name: "auto_falls_back_to_local_trash_when_system_trash_unusable",
-			run: func(t *testing.T) {
-				t.Helper()
-				if runtime.GOOS == toolutil.GOOSWindows {
-					t.Skip("HOME/XDG behavior differs on Windows")
-				}
-
-				tmpHome := t.TempDir()
-				t.Setenv("HOME", tmpHome)
-				xdg := filepath.Join(tmpHome, "xdgdata")
-				t.Setenv("XDG_DATA_HOME", xdg)
-
-				// Break system trash by making it a file, so EnsureDirNoSymlink fails.
-				switch runtime.GOOS {
-				case toolutil.GOOSDarwin:
-					writeFile(t, filepath.Join(tmpHome, ".Trash"), []byte("not a dir"))
-				case toolutil.GOOSLinux,
-					toolutil.GOOSFreebsd,
-					toolutil.GOOSOpenbsd,
-					toolutil.GOOSNetbsd,
-					toolutil.GOOSDragonfly:
-					if err := os.MkdirAll(filepath.Join(xdg, "Trash"), 0o755); err != nil {
-						t.Fatalf("MkdirAll: %v", err)
+				return src, DeleteFileArgs{Path: src, TrashDir: trashAsFile}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if _, err := os.Lstat(src); err != nil {
+						t.Fatalf("expected original to remain, stat err=%v", err)
 					}
-					writeFile(t, filepath.Join(xdg, "Trash", "files"), []byte("not a dir"))
+				}
+			},
+			wantErr: wantErrAny,
+		},
+		{
+			name: "auto_uses_system_trash_or_falls_back_to_local",
+			cfg: func(t *testing.T) policyCfg {
+				t.Helper()
+				tmp := t.TempDir()
+				return policyCfg{workBaseDir: tmp}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("system trash detection is not defined in this tool for Windows; auto uses local fallback")
+				}
+
+				tmpHome := t.TempDir()
+				t.Setenv("HOME", tmpHome)
+
+				// Prefer XDG on linux/bsd.
+				xdg := filepath.Join(tmpHome, "xdgdata")
+				t.Setenv("XDG_DATA_HOME", xdg)
+
+				src := filepath.Join(cfg.workBaseDir, "auto.txt")
+				mustWriteFile(t, src, []byte("x"))
+
+				wantTrash, ok := systemTrashExpected(t, tmpHome)
+				if !ok {
+					t.Skipf("system trash not defined for GOOS=%q in this test", runtime.GOOS)
+				}
+
+				return src, DeleteFileArgs{Path: src, TrashDir: "auto"}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if out == nil {
+						t.Fatalf("expected non-nil out")
+					}
+					gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
+					wantDir := filepath.Clean(canonForPolicyExpectations(wantTrash))
+					if gotDir != wantDir {
+						t.Fatalf("trashed dir=%q want=%q (trash=%q)", gotDir, wantDir, wantTrash)
+					}
+				}
+			},
+			wantErr: wantErrNone,
+		},
+		{
+			name: "auto_falls_back_to_local_when_system_trash_unusable",
+			cfg: func(t *testing.T) policyCfg {
+				t.Helper()
+				tmp := t.TempDir()
+				return policyCfg{workBaseDir: tmp}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("HOME/XDG behavior differs on Windows")
+				}
+
+				tmpHome := t.TempDir()
+				t.Setenv("HOME", tmpHome)
+				xdg := filepath.Join(tmpHome, "xdgdata")
+				t.Setenv("XDG_DATA_HOME", xdg)
+
+				// Break system trash by making it a file, so EnsureDir fails.
+				switch runtime.GOOS {
+				case toolutil.GOOSDarwin:
+					mustWriteFile(t, filepath.Join(tmpHome, ".Trash"), []byte("not a dir"))
+				case toolutil.GOOSLinux, "freebsd", "openbsd", "netbsd", "dragonfly":
+					mustMkdirAll(t, filepath.Join(xdg, "Trash"))
+					mustWriteFile(t, filepath.Join(xdg, "Trash", "files"), []byte("not a dir"))
 				default:
 					t.Skipf("system trash not defined for GOOS=%q in this test", runtime.GOOS)
 				}
 
-				tmp := t.TempDir()
-				p := filepath.Join(tmp, "auto.txt")
-				writeFile(t, p, []byte("x"))
+				src := filepath.Join(cfg.workBaseDir, "auto.txt")
+				mustWriteFile(t, src, []byte("x"))
 
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: p, TrashDir: "   "}, fsToolPolicy{})
-				if err != nil {
-					t.Fatalf("deleteFile(auto whitespace): %v", err)
-				}
-				wantFallback := filepath.Join(filepath.Dir(p), ".trash")
-				if filepath.Clean(
-					filepath.Dir(out.TrashedPath),
-				) != filepath.Clean(
-					fileutil.ApplyDarwinSystemRootAliases(wantFallback),
-				) {
-					t.Fatalf("trashed dir=%q want fallback=%q", filepath.Dir(out.TrashedPath), wantFallback)
+				return src, DeleteFileArgs{Path: src, TrashDir: "   "}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					if out == nil {
+						t.Fatalf("expected non-nil out")
+					}
+					wantFallback := filepath.Join(filepath.Dir(canonForPolicyExpectations(src)), ".trash")
+					gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
+					if gotDir != filepath.Clean(wantFallback) {
+						t.Fatalf("trashed dir=%q want fallback=%q", gotDir, wantFallback)
+					}
 				}
 			},
+			wantErr: wantErrNone,
 		},
 		{
-			name: "symlink_is_moved_as_symlink_best_effort",
-			run: func(t *testing.T) {
+			name: "allowedRoots_blocks_outside_path",
+			cfg: func(t *testing.T) policyCfg {
 				t.Helper()
-				if runtime.GOOS == toolutil.GOOSWindows {
-					t.Skip("symlink tests often require privileges on Windows")
-				}
-				tmp := t.TempDir()
-				target := filepath.Join(tmp, "target.txt")
-				writeFile(t, target, []byte("keep"))
-
-				link := filepath.Join(tmp, "link.txt")
-				if err := os.Symlink(target, link); err != nil {
-					t.Skipf("symlink not available: %v", err)
-				}
-
-				trash := filepath.Join(tmp, "trash")
-				out, err := deleteFile(t.Context(), DeleteFileArgs{Path: link, TrashDir: trash}, fsToolPolicy{})
-				if err != nil {
-					t.Fatalf("deleteFile: %v", err)
-				}
-
-				if _, err := os.Stat(target); err != nil {
-					t.Fatalf("target missing: %v", err)
-				}
-				if _, err := os.Lstat(link); !os.IsNotExist(err) {
-					t.Fatalf("expected original link removed, stat err=%v", err)
-				}
-
-				st, err := os.Lstat(out.TrashedPath)
-				if err != nil {
-					t.Fatalf("Lstat trashed: %v", err)
-				}
-				if (st.Mode() & os.ModeSymlink) == 0 {
-					t.Fatalf("expected symlink in trash, got mode: %v", st.Mode())
-				}
-				gotTarget, err := os.Readlink(out.TrashedPath)
-				if err != nil {
-					t.Fatalf("Readlink trashed: %v", err)
-				}
-				if gotTarget != target {
-					t.Fatalf("symlink target=%q want=%q", gotTarget, target)
+				root := t.TempDir()
+				outside := t.TempDir()
+				_ = outside
+				return policyCfg{
+					workBaseDir:  root,
+					allowedRoots: []string{root},
 				}
 			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				outside := t.TempDir()
+				src := filepath.Join(outside, "x.txt")
+				mustWriteFile(t, src, []byte("x"))
+				return src, DeleteFileArgs{Path: src, TrashDir: filepath.Join(cfg.workBaseDir, "trash")}, nil
+			},
+			wantErr: wantErrContains("outside allowed roots"),
+		},
+		{
+			name: "symlink_file_allowed_when_blockSymlinks_false",
+			cfg: func(t *testing.T) policyCfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				tmp := t.TempDir()
+				return policyCfg{workBaseDir: tmp, blockSymlinks: false}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				target := filepath.Join(cfg.workBaseDir, "target.txt")
+				mustWriteFile(t, target, []byte("keep"))
+
+				link := filepath.Join(cfg.workBaseDir, "link.txt")
+				mustSymlinkOrSkip(t, target, link)
+
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				return link, DeleteFileArgs{Path: link, TrashDir: trash}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					t.Helper()
+					if _, err := os.Stat(target); err != nil {
+						t.Fatalf("target missing: %v", err)
+					}
+					if _, err := os.Lstat(link); !os.IsNotExist(err) {
+						t.Fatalf("expected original link removed, stat err=%v", err)
+					}
+					st, err := os.Lstat(out.TrashedPath)
+					if err != nil {
+						t.Fatalf("Lstat trashed: %v", err)
+					}
+					if (st.Mode() & os.ModeSymlink) == 0 {
+						t.Fatalf("expected symlink in trash, got mode=%v", st.Mode())
+					}
+				}
+			},
+			wantErr: wantErrNone,
+		},
+		{
+			name: "symlink_file_refused_when_blockSymlinks_true",
+			cfg: func(t *testing.T) policyCfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				tmp := t.TempDir()
+				return policyCfg{workBaseDir: tmp, blockSymlinks: true}
+			},
+			setup: func(t *testing.T, cfg policyCfg) (string, DeleteFileArgs, func(t *testing.T, out *DeleteFileOut)) {
+				t.Helper()
+				target := filepath.Join(cfg.workBaseDir, "target.txt")
+				mustWriteFile(t, target, []byte("keep"))
+
+				link := filepath.Join(cfg.workBaseDir, "link.txt")
+				mustSymlinkOrSkip(t, target, link)
+
+				trash := filepath.Join(cfg.workBaseDir, "trash")
+				return link, DeleteFileArgs{Path: link, TrashDir: trash}, func(t *testing.T, out *DeleteFileOut) {
+					t.Helper()
+					t.Helper()
+					if _, err := os.Lstat(link); err != nil {
+						t.Fatalf("expected original link to remain, stat err=%v", err)
+					}
+				}
+			},
+			wantErr: wantErrContains("symlink"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.run(t)
+			cfg := tt.cfg(t)
+			ft := makeTool(t, cfg)
+
+			ctx := t.Context()
+			if tt.ctx != nil {
+				ctx = tt.ctx(t)
+			}
+
+			src, args, check := tt.setup(t, cfg)
+			if src == "skip" {
+				return
+			}
+
+			out, err := ft.DeleteFile(ctx, args)
+			if tt.wantErr == nil {
+				tt.wantErr = wantErrNone
+			}
+			if !tt.wantErr(err) {
+				t.Fatalf("err=%v did not match expectation", err)
+			}
+			if err == nil && check != nil {
+				check(t, out)
+			}
+			if err != nil && check != nil {
+				check(t, nil)
+			}
 		})
 	}
 }

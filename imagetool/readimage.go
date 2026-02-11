@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -73,19 +74,12 @@ type ReadImageOut struct {
 func readImage(
 	ctx context.Context,
 	args ReadImageArgs,
-	tp imageToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*ReadImageOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := fileutil.ReadImage(p, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
+	info, err := ioutil.ReadImage(p, args.Path, args.IncludeBase64Data, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}

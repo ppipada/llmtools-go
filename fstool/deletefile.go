@@ -10,7 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -77,17 +78,23 @@ type trashCandidate struct {
 func deleteFile(
 	ctx context.Context,
 	args DeleteFileArgs,
-	tp fsToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*DeleteFileOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-
-	src, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	src, err := p.ResolvePath(args.Path, "")
 	if err != nil {
 		return nil, err
+	}
+
+	if p.BlockSymlinks() {
+		parent := filepath.Dir(src)
+		if parent != "" && parent != "." {
+			if err := p.VerifyDirResolved(parent); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	st, err := os.Lstat(src)
@@ -102,6 +109,9 @@ func deleteFile(
 	if !st.Mode().IsRegular() && (st.Mode()&os.ModeSymlink) == 0 {
 		return nil, fmt.Errorf("refusing to delete non-regular file: %s", src)
 	}
+	if (st.Mode()&os.ModeSymlink) != 0 && p.BlockSymlinks() {
+		return nil, fmt.Errorf("%w: refusing to delete symlink file: %s", fspolicy.ErrSymlinkDisallowed, src)
+	}
 
 	trashDirIn := strings.TrimSpace(args.TrashDir)
 	if trashDirIn == "" {
@@ -111,20 +121,19 @@ func deleteFile(
 	candidates := []trashCandidate{}
 	if trashDirIn == "auto" {
 		if sys, ok := detectSystemTrashDir(); ok {
-			sys = fileutil.ApplyDarwinSystemRootAliases(sys)
-			if err := fileutil.EnsurePathWithinAllowedRoots(sys, allowedRoots); err == nil {
+			if td, rerr := p.ResolvePath(sys, ""); rerr == nil {
 				// "auto" should prefer system trash *when possible*; treat EXDEV as "not possible"
 				// so we can fall back to a same-filesystem .trash instead of doing a huge copy.
-				candidates = append(candidates, trashCandidate{dir: sys, allowCrossDeviceCopy: false})
+				candidates = append(candidates, trashCandidate{dir: td, allowCrossDeviceCopy: false})
 			}
 		}
 		// Always provide a same-filesystem-ish fallback near the file.
 		local := filepath.Join(filepath.Dir(src), ".trash")
-		if err := fileutil.EnsurePathWithinAllowedRoots(local, allowedRoots); err == nil {
-			candidates = append(candidates, trashCandidate{dir: local, allowCrossDeviceCopy: true})
+		if td, rerr := p.ResolvePath(local, ""); rerr == nil {
+			candidates = append(candidates, trashCandidate{dir: td, allowCrossDeviceCopy: true})
 		}
 	} else {
-		td, err := fileutil.ResolvePath(workBaseDir, allowedRoots, trashDirIn, "")
+		td, err := p.ResolvePath(trashDirIn, "")
 		if err != nil {
 			return nil, err
 		}
@@ -140,12 +149,8 @@ func deleteFile(
 			return nil, err
 		}
 
-		// Create trash dir if needed; do not follow symlink components.
-		if _, err := fileutil.EnsureDirNoSymlink(td, 0 /*unlimited*/); err != nil {
-			lastErr = err
-			continue
-		}
-		if err := fileutil.VerifyDirNoSymlink(td); err != nil {
+		// Create trash dir if needed (policy enforces symlink rules when enabled).
+		if _, err := p.EnsureDirResolved(td, 0 /*unlimited*/); err != nil {
 			lastErr = err
 			continue
 		}
@@ -196,11 +201,11 @@ func moveToTrash(
 ) (trashedPath string, method DeleteFileMethod, bytesWritten int64, err error) {
 	base := filepath.Base(src)
 	if base == "" || base == string(os.PathSeparator) || base == "." {
-		return "", "", 0, fileutil.ErrInvalidPath
+		return "", "", 0, ioutil.ErrInvalidPath
 	}
 
 	for range 12 {
-		dest, err := fileutil.UniquePathInDir(trashDir, base)
+		dest, err := ioutil.UniquePathInDir(trashDir, base)
 		if err != nil {
 			return "", "", 0, err
 		}
@@ -277,9 +282,9 @@ func moveToTrash(
 			var cerr error
 			if reserved {
 				// Copy into the already-reserved placeholder to avoid a remove+race+recreate window.
-				n, cerr = fileutil.CopyFileToExistingCtx(ctx, src, dest)
+				n, cerr = ioutil.CopyFileToExistingCtx(ctx, src, dest)
 			} else {
-				n, cerr = fileutil.CopyFileCtx(ctx, src, dest, 0o600)
+				n, cerr = ioutil.CopyFileCtx(ctx, src, dest, 0o600)
 			}
 			if cerr != nil {
 				_ = os.Remove(dest)

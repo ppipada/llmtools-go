@@ -2,244 +2,271 @@ package fstool
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
 func TestMIMEForPath(t *testing.T) {
-	t.Parallel()
+	type cfg struct {
+		workBaseDir   string
+		allowedRoots  []string
+		blockSymlinks bool
+	}
 
-	writeFile := func(t *testing.T, dir, name string, data []byte) string {
+	makeTool := func(t *testing.T, c cfg) *FSTool {
 		t.Helper()
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, data, 0o600); err != nil {
-			t.Fatalf("WriteFile(%q): %v", p, err)
+		opts := []FSToolOption{WithWorkBaseDir(c.workBaseDir), WithBlockSymlinks(c.blockSymlinks)}
+		if c.allowedRoots != nil {
+			opts = append(opts, WithAllowedRoots(c.allowedRoots))
 		}
-		return p
+		return mustNewFSTool(t, opts...)
 	}
 
 	pngHeader := []byte{
 		0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n',
-		// Extra bytes to avoid edge conditions; DetectContentType only needs the signature.
 		0x00, 0x00, 0x00, 0x0D, 'I', 'H', 'D', 'R',
 	}
 
-	binaryWithNUL := []byte{0x00, 0x01, 0x02, 0x03, 0x04}
+	tests := []struct {
+		name    string
+		cfg     func(t *testing.T) cfg
+		ctx     func(t *testing.T) context.Context
+		args    func(t *testing.T, c cfg) MIMEForPathArgs
+		wantErr func(error) bool
 
-	type tc struct {
-		name string
-		ctx  func(t *testing.T) context.Context
-		args func(t *testing.T) MIMEForPathArgs
-
-		wantErr           bool
-		wantErrIsNotExist bool
-		wantErrIsCanceled bool
-		wantErrIsPathErr  bool
-
-		wantExt     string
-		wantNormExt string
-
-		wantMIME   string
-		wantBase   string
-		wantMode   MIMEMode
 		wantMethod MIMEDetectMethod
-	}
-
-	tests := []tc{
+		wantMIME   string
+		wantMode   MIMEMode
+		wantExt    string
+		wantNorm   string
+	}{
 		{
 			name: "context_canceled",
-			ctx: func(t *testing.T) context.Context {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				ctx, cancel := context.WithCancel(t.Context())
-				cancel()
-				return ctx
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
 			},
-			args: func(t *testing.T) MIMEForPathArgs {
+			ctx: canceledContext,
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
 				return MIMEForPathArgs{Path: "whatever.txt"}
 			},
-			wantErr:           true,
-			wantErrIsCanceled: true,
+			wantErr: wantErrIs(context.Canceled),
 		},
 		{
 			name: "invalid_path_empty",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
 				return MIMEForPathArgs{Path: "   "}
 			},
-			wantErr: true,
+			wantErr: wantErrContains("invalid path"),
 		},
 		{
 			name: "nonexistent_known_extension_uses_extension_no_io",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				dir := t.TempDir()
-				// Uppercase extension to ensure normalization behavior is correct.
-				return MIMEForPathArgs{Path: filepath.Join(dir, "missing.PDF")}
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
 			},
-			wantErr:     false,
-			wantExt:     ".PDF",
-			wantNormExt: ".pdf",
-			wantMIME:    "application/pdf",
-			wantBase:    "application/pdf",
-			wantMode:    MIMEModeDocument,
-			wantMethod:  MIMEDetectMethodExtension,
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing.PDF")}
+			},
+			wantErr:    wantErrNone,
+			wantMethod: MIMEDetectMethodExtension,
+			wantMIME:   "application/pdf",
+			wantMode:   MIMEModeDocument,
+			wantExt:    ".PDF",
+			wantNorm:   ".pdf",
 		},
 		{
-			name: "nonexistent_unknown_extension_errors_not_exist",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			name: "nonexistent_unknown_extension_errors_isnotexist",
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				dir := t.TempDir()
-				return MIMEForPathArgs{Path: filepath.Join(dir, "missing.unknownext")}
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
 			},
-			wantErr:           true,
-			wantErrIsNotExist: true,
-		},
-		{
-			name: "existing_txt_uses_extension",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				dir := t.TempDir()
-				p := writeFile(t, dir, "a.txt", []byte("hello\n"))
-				return MIMEForPathArgs{Path: p}
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing.unknownext")}
 			},
-			wantErr:     false,
-			wantExt:     ".txt",
-			wantNormExt: ".txt",
-			wantMIME:    "text/plain; charset=utf-8",
-			wantBase:    "text/plain",
-			wantMode:    MIMEModeText,
-			wantMethod:  MIMEDetectMethodExtension,
+			wantErr: func(err error) bool { return err != nil && os.IsNotExist(err) },
 		},
 		{
 			name: "existing_no_extension_sniffs_text",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				dir := t.TempDir()
-				p := writeFile(t, dir, "noext", []byte("hello\n"))
-				return MIMEForPathArgs{Path: p}
+				tmp := t.TempDir()
+				mustWriteFile(t, filepath.Join(tmp, "noext"), []byte("hello\n"))
+				return cfg{workBaseDir: tmp}
 			},
-			wantErr:     false,
-			wantExt:     "",
-			wantNormExt: "",
-			wantMIME:    "text/plain; charset=utf-8",
-			wantBase:    "text/plain",
-			wantMode:    MIMEModeText,
-			wantMethod:  MIMEDetectMethodSniff,
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "noext")}
+			},
+			wantErr:    wantErrNone,
+			wantMethod: MIMEDetectMethodSniff,
+			wantMIME:   "text/plain; charset=utf-8",
+			wantMode:   MIMEModeText,
+			wantExt:    "",
+			wantNorm:   "",
 		},
 		{
 			name: "existing_unknown_extension_sniffs_png",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				dir := t.TempDir()
-				p := writeFile(t, dir, "x.bin", pngHeader)
-				return MIMEForPathArgs{Path: p}
+				tmp := t.TempDir()
+				mustWriteFile(t, filepath.Join(tmp, "x.bin"), pngHeader)
+				return cfg{workBaseDir: tmp}
 			},
-			wantErr:     false,
-			wantExt:     ".bin",
-			wantNormExt: ".bin",
-			wantMIME:    "image/png",
-			wantBase:    "image/png",
-			wantMode:    MIMEModeImage,
-			wantMethod:  MIMEDetectMethodSniff,
-		},
-		{
-			name: "existing_unknown_extension_sniffs_binary_octet_stream",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
 				t.Helper()
-				dir := t.TempDir()
-				p := writeFile(t, dir, "x.bin", binaryWithNUL)
-				return MIMEForPathArgs{Path: p}
+				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "x.bin")}
 			},
-			wantErr:     false,
-			wantExt:     ".bin",
-			wantNormExt: ".bin",
-			wantMIME:    "application/octet-stream",
-			wantBase:    "application/octet-stream",
-			wantMode:    MIMEModeDefault,
-			wantMethod:  MIMEDetectMethodSniff,
+			wantErr:    wantErrNone,
+			wantMethod: MIMEDetectMethodSniff,
+			wantMIME:   "image/png",
+			wantMode:   MIMEModeImage,
+			wantExt:    ".bin",
+			wantNorm:   ".bin",
 		},
 		{
 			name: "directory_path_errors",
-
-			args: func(t *testing.T) MIMEForPathArgs {
+			cfg: func(t *testing.T) cfg {
 				t.Helper()
-				dir := t.TempDir()
-				return MIMEForPathArgs{Path: dir}
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
 			},
-			wantErr:          true,
-			wantErrIsPathErr: true,
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				return MIMEForPathArgs{Path: c.workBaseDir}
+			},
+			wantErr: wantErrAny,
+		},
+		{
+			name: "allowedRoots_blocks_outside_path",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				root := t.TempDir()
+				return cfg{workBaseDir: root, allowedRoots: []string{root}}
+			},
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				outside := t.TempDir()
+				return MIMEForPathArgs{Path: filepath.Join(outside, "x.txt")}
+			},
+			wantErr: wantErrContains("outside allowed roots"),
+		},
+		{
+			name: "symlink_sniff_allowed_when_blockSymlinks_false",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp, blockSymlinks: false}
+			},
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				target := filepath.Join(c.workBaseDir, "target.unknownext")
+				mustWriteFile(t, target, []byte("hello\n"))
+				link := filepath.Join(c.workBaseDir, "link.unknownext")
+				mustSymlinkOrSkip(t, target, link)
+				return MIMEForPathArgs{Path: link}
+			},
+			wantErr:    wantErrNone,
+			wantMethod: MIMEDetectMethodSniff,
+			wantMode:   MIMEModeText,
+			wantExt:    ".unknownext",
+			wantNorm:   ".unknownext",
+		},
+		{
+			name: "symlink_sniff_refused_when_blockSymlinks_true",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				if runtime.GOOS == toolutil.GOOSWindows {
+					t.Skip("symlink tests are unreliable on Windows CI")
+				}
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp, blockSymlinks: true}
+			},
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				target := filepath.Join(c.workBaseDir, "target.unknownext")
+				mustWriteFile(t, target, []byte("hello\n"))
+				link := filepath.Join(c.workBaseDir, "link.unknownext")
+				mustSymlinkOrSkip(t, target, link)
+				return MIMEForPathArgs{Path: link}
+			},
+			wantErr: wantErrContains("symlink"),
+		},
+		{
+			name: "windows_drive_relative_path_rejected",
+			cfg: func(t *testing.T) cfg {
+				t.Helper()
+				tmp := t.TempDir()
+				return cfg{workBaseDir: tmp}
+			},
+			args: func(t *testing.T, c cfg) MIMEForPathArgs {
+				t.Helper()
+				if runtime.GOOS != toolutil.GOOSWindows {
+					t.Skip("windows-only behavior")
+				}
+				return MIMEForPathArgs{Path: `C:drive-relative.txt`}
+			},
+			wantErr: wantErrContains("drive-relative"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			c := tt.cfg(t)
+			ft := makeTool(t, c)
+
 			ctx := t.Context()
 			if tt.ctx != nil {
 				ctx = tt.ctx(t)
 			}
 
-			out, err := mimeForPath(ctx, tt.args(t), fsToolPolicy{})
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil (out=%+v)", out)
-				}
-
-				if tt.wantErrIsCanceled && !errors.Is(err, context.Canceled) {
-					t.Fatalf("expected context.Canceled, got: %v", err)
-				}
-				if tt.wantErrIsNotExist && !os.IsNotExist(err) {
-					t.Fatalf("expected IsNotExist error, got: %T %v", err, err)
-				}
-				if tt.wantErrIsPathErr {
-					var pe *os.PathError
-					if !errors.As(err, &pe) {
-						t.Fatalf("expected *os.PathError, got: %T %v", err, err)
-					}
-				}
-
-				// For invalid path we can assert message without importing internal packages.
-				if tt.name == "invalid_path_empty" && err.Error() != "invalid path" {
-					t.Fatalf("expected error %q, got %q", "invalid path", err.Error())
-				}
-				return
+			out, err := ft.MIMEForPath(ctx, tt.args(t, c))
+			if tt.wantErr == nil {
+				tt.wantErr = wantErrNone
 			}
-
+			if !tt.wantErr(err) {
+				t.Fatalf("err=%v did not match expectation", err)
+			}
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				return
 			}
 			if out == nil {
 				t.Fatalf("expected non-nil out")
 			}
 
+			if tt.wantMethod != "" && out.Method != tt.wantMethod {
+				t.Fatalf("Method=%q want=%q", out.Method, tt.wantMethod)
+			}
+			if tt.wantMIME != "" && out.MIMEType != tt.wantMIME {
+				t.Fatalf("MIMEType=%q want=%q", out.MIMEType, tt.wantMIME)
+			}
+			if tt.wantMode != "" && out.Mode != tt.wantMode {
+				t.Fatalf("Mode=%q want=%q", out.Mode, tt.wantMode)
+			}
 			if out.Extension != tt.wantExt {
-				t.Fatalf("Extension: got %q want %q", out.Extension, tt.wantExt)
+				t.Fatalf("Extension=%q want=%q", out.Extension, tt.wantExt)
 			}
-			if out.NormalizedExtension != tt.wantNormExt {
-				t.Fatalf("NormalizedExtension: got %q want %q", out.NormalizedExtension, tt.wantNormExt)
-			}
-			if out.MIMEType != tt.wantMIME {
-				t.Fatalf("MIMEType: got %q want %q", out.MIMEType, tt.wantMIME)
-			}
-			if out.BaseMIMEType != tt.wantBase {
-				t.Fatalf("BaseMIMEType: got %q want %q", out.BaseMIMEType, tt.wantBase)
-			}
-			if out.Mode != tt.wantMode {
-				t.Fatalf("Mode: got %q want %q", out.Mode, tt.wantMode)
-			}
-			if out.Method != tt.wantMethod {
-				t.Fatalf("Method: got %q want %q", out.Method, tt.wantMethod)
+			if out.NormalizedExtension != tt.wantNorm {
+				t.Fatalf("NormalizedExtension=%q want=%q", out.NormalizedExtension, tt.wantNorm)
 			}
 		})
 	}

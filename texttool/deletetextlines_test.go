@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -136,8 +137,11 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeTempTextFile(t, dir, "del-*.txt", tt.initial)
 			args := tt.args(path)
-
-			out, err := deleteTextLines(t.Context(), args, textToolPolicy{})
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			out, err := deleteTextLines(t.Context(), args, policy)
 			mustNoErr(t, err)
 
 			if out.DeletionsMade != tt.wantDeletions {
@@ -167,7 +171,10 @@ func TestDeleteTextLines_HappyPaths(t *testing.T) {
 
 func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	dir := newWorkDir(t)
-
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	tests := []struct {
 		name              string
 		setup             func(t *testing.T) (path string)
@@ -284,9 +291,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := tt.setup(t)
-
 			args := tt.args(path)
-
 			ctx := t.Context()
 			if tt.wantIsCtx {
 				cctx, cancel := context.WithCancel(ctx)
@@ -294,7 +299,7 @@ func TestDeleteTextLines_ErrorCases(t *testing.T) {
 				ctx = cctx
 			}
 
-			_, err := deleteTextLines(ctx, args, textToolPolicy{})
+			_, err := deleteTextLines(ctx, args, policy)
 			if tt.wantIsCtx {
 				if err == nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected context.Canceled, got %v", err)

@@ -1,7 +1,6 @@
-package fileutil
+package ioutil
 
 import (
-	"bytes"
 	"errors"
 	"io/fs"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 func TestListDirectory(t *testing.T) {
@@ -78,12 +79,16 @@ func TestListDirectory(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t)
 			}
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
 			dir := tc.dir
 			if dir == "" {
 				dir = "."
 			}
-			var err error
-			dir, err = NormalizePath(dir)
+
+			dir, err = policy.ResolvePath(dir, "")
 			if err != nil {
 				if tc.wantErrIs != nil {
 					if !errors.Is(err, tc.wantErrIs) {
@@ -128,9 +133,12 @@ func TestListDirectory_DefaultPathDot(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(tmp, "dir"), 0o755); err != nil {
 		t.Fatalf("failed to mkdir: %v", err)
 	}
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
 	dir := "."
-	var err error
-	dir, err = NormalizePath(dir)
+	dir, err = policy.ResolvePath(dir, "")
 	if err != nil {
 		t.Fatalf("got normalize err (got=%v)", err)
 	}
@@ -207,8 +215,11 @@ func TestListDirectory_Additional(t *testing.T) {
 			if dir == "" {
 				dir = "."
 			}
-			var err error
-			dir, err = NormalizePath(dir)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			dir, err = policy.ResolvePath(dir, "")
 			if err != nil {
 				t.Fatalf("got normalization error (got=%v)", err)
 			}
@@ -243,37 +254,6 @@ func TestListDirectory_Additional(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestCanonicalWorkdir_AndEnsureDirExists(t *testing.T) {
-	td := t.TempDir()
-
-	got, err := canonicalWorkdir(td)
-	if err != nil {
-		t.Fatalf("canonicalWorkdir error: %v", err)
-	}
-	if !filepath.IsAbs(got) {
-		t.Fatalf("expected abs path, got: %q", got)
-	}
-	if err := ensureDirExists(got); err != nil {
-		t.Fatalf("ensureDirExists error: %v", err)
-	}
-
-	// Not a directory.
-	f := filepath.Join(td, "f")
-	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-	_, err = GetEffectiveWorkDir(f, nil)
-	if err == nil || !strings.Contains(err.Error(), "not a directory") {
-		t.Fatalf("expected not-a-directory error, got: %v", err)
-	}
-
-	// NUL check.
-	_, err = canonicalWorkdir("bad\x00path")
-	if err == nil || !strings.Contains(err.Error(), "NUL") {
-		t.Fatalf("expected NUL error, got: %v", err)
 	}
 }
 
@@ -329,198 +309,103 @@ func TestListDirectoryNormalized_SortsAndFiltersAndErrors(t *testing.T) {
 	_ = runtime.GOOS
 }
 
-func TestCanonicalizeAllowedRoots_ValidatesExistenceAndDirectories(t *testing.T) {
-	td := t.TempDir()
-	f := filepath.Join(td, "file.txt")
-	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+func TestUniquePathInDir(t *testing.T) {
+	t.Parallel()
 
-	cases := []struct {
-		name          string
-		roots         []string
-		wantLen       int
-		wantErrSubstr string
+	tmpDir := t.TempDir()
+	missingDir := filepath.Join(tmpDir, "missing")
+	notADir := filepath.Join(tmpDir, "notadir")
+	mustWriteBytes(t, notADir, []byte("x"))
+
+	// Create a collision for the plain base name.
+	base := "a.txt"
+	mustWriteBytes(t, filepath.Join(tmpDir, base), []byte("x"))
+
+	tests := []struct {
+		name      string
+		dir       string
+		base      string
+		wantErrIs error
+		check     func(t *testing.T, got string)
 	}{
-		{name: "ignores_empty", roots: []string{"", "   ", td}, wantLen: 1},
-		{name: "nonexistent_errors", roots: []string{filepath.Join(td, "nope")}, wantErrSubstr: "no such dir"},
-		{name: "file_is_not_dir_errors", roots: []string{f}, wantErrSubstr: "not a directory"},
+		{
+			name: "returns_unique_name_when_base_exists",
+			dir:  tmpDir,
+			base: base,
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				if filepath.Dir(got) != tmpDir {
+					t.Fatalf("dir=%q want %q", filepath.Dir(got), tmpDir)
+				}
+				if got == filepath.Join(tmpDir, base) {
+					t.Fatalf("expected a different path than the colliding base; got %q", got)
+				}
+				if !strings.HasPrefix(filepath.Base(got), "a.") {
+					t.Fatalf("expected generated name to start with %q, got %q", "a.", filepath.Base(got))
+				}
+				if filepath.Ext(got) != ".txt" {
+					t.Fatalf("ext=%q want .txt", filepath.Ext(got))
+				}
+				if _, err := os.Lstat(got); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("expected generated path to not exist yet; statErr=%v", err)
+				}
+			},
+		},
+		{
+			name:      "rejects_empty_dir",
+			dir:       "   ",
+			base:      "x.txt",
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "rejects_empty_base",
+			dir:       tmpDir,
+			base:      "   ",
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "rejects_base_path_traversal",
+			dir:       tmpDir,
+			base:      "../x.txt",
+			wantErrIs: ErrInvalidPath,
+		},
+		{
+			name:      "errors_if_dir_missing",
+			dir:       missingDir,
+			base:      "x.txt",
+			wantErrIs: os.ErrNotExist,
+		},
+		{
+			name: "errors_if_dir_is_file",
+			dir:  notADir,
+			base: "x.txt",
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				_ = got
+			},
+			wantErrIs: ErrInvalidDir,
+		},
 	}
 
-	for _, tc := range cases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := CanonicalizeAllowedRoots(tc.roots)
-			if tc.wantErrSubstr != "" {
+			t.Parallel()
+			got, err := UniquePathInDir(tc.dir, tc.base)
+			if tc.wantErrIs != nil {
 				if err == nil {
-					t.Fatalf("expected error")
+					t.Fatalf("expected error, got nil (got=%q)", got)
 				}
-				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
+				if !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("err=%v; want errors.Is(_, %v)=true", err, tc.wantErrIs)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if len(got) != tc.wantLen {
-				t.Fatalf("len got=%d want=%d roots=%v", len(got), tc.wantLen, got)
-			}
-			for _, r := range got {
-				if !filepath.IsAbs(r) {
-					t.Fatalf("expected abs root, got %q", r)
-				}
+			if tc.check != nil {
+				tc.check(t, got)
 			}
 		})
 	}
-}
-
-func TestGetEffectiveWorkDir_EnforcesRootsAndExistence(t *testing.T) {
-	td := t.TempDir()
-	td2 := t.TempDir()
-
-	f := filepath.Join(td, "file.txt")
-	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	cases := []struct {
-		name          string
-		input         string
-		roots         []string
-		wantErrSubstr string
-		wantSameAs    string
-	}{
-		{name: "empty_errors", input: "   ", roots: nil, wantErrSubstr: "empty workdir"},
-		{name: "nonexistent_errors", input: filepath.Join(td, "nope"), roots: nil, wantErrSubstr: "no such dir"},
-		{name: "file_errors", input: f, roots: nil, wantErrSubstr: "not a directory"},
-		{name: "outside_roots_errors", input: td2, roots: []string{td}, wantErrSubstr: "outside allowed roots"},
-		{name: "within_roots_ok", input: td, roots: []string{td}, wantSameAs: td},
-		{name: "no_roots_allows_any", input: td2, roots: nil, wantSameAs: td2},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			roots := tc.roots
-			var err error
-			if len(tc.roots) != 0 {
-				roots, err = CanonicalizeAllowedRoots(roots)
-				if err != nil {
-					t.Fatalf("could not CanonicalizeAllowedRoots")
-				}
-			}
-			got, err := GetEffectiveWorkDir(tc.input, roots)
-			if tc.wantErrSubstr != "" {
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tc.wantSameAs != "" {
-				mustSameDir(t, tc.wantSameAs, got)
-			}
-		})
-	}
-}
-
-func TestEnsurePathWithinAllowedRoots(t *testing.T) {
-	td := t.TempDir()
-	td2 := t.TempDir()
-
-	cases := []struct {
-		name          string
-		p             string
-		roots         []string
-		wantErrSubstr string
-	}{
-		{name: "no_roots_allows", p: td2, roots: nil},
-		{name: "within_root_ok", p: td, roots: []string{td}},
-		{name: "outside_root_errors", p: td2, roots: []string{td}, wantErrSubstr: "outside allowed roots"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := EnsurePathWithinAllowedRoots(tc.p, tc.roots)
-			if tc.wantErrSubstr != "" {
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				if !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.wantErrSubstr)) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErrSubstr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestIsPathWithinRoot(t *testing.T) {
-	td := t.TempDir()
-	sub := filepath.Join(td, "sub")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	cases := []struct {
-		name          string
-		root          string
-		p             string
-		want          bool
-		wantErrSubstr string
-	}{
-		{name: "same_dir_true", root: td, p: td, want: true},
-		{name: "child_true", root: td, p: sub, want: true},
-		{name: "outside_false", root: sub, p: td, want: false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := IsPathWithinRoot(tc.root, tc.p)
-			if tc.wantErrSubstr != "" {
-				if err == nil {
-					t.Fatalf("expected error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("got %v want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func mustSameDir(t *testing.T, a, b string) {
-	t.Helper()
-	sa, err := os.Stat(a)
-	if err != nil {
-		t.Fatalf("stat(%q): %v", a, err)
-	}
-	sb, err := os.Stat(b)
-	if err != nil {
-		t.Fatalf("stat(%q): %v", b, err)
-	}
-	if !os.SameFile(sa, sb) {
-		t.Fatalf("expected same dir:\n  a=%q\n  b=%q", a, b)
-	}
-}
-
-func mustWriteFile(t *testing.T, dir, name string, size int) string {
-	t.Helper()
-	full := filepath.Join(dir, name)
-	data := bytes.Repeat([]byte("x"), size)
-	if err := os.WriteFile(full, data, 0o600); err != nil {
-		t.Fatalf("failed to write file %q: %v", full, err)
-	}
-	return full
 }

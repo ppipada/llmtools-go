@@ -10,7 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/pdfutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
@@ -61,62 +62,54 @@ type ReadFileArgs struct {
 func readFile(
 	ctx context.Context,
 	args ReadFileArgs,
-	tp fsToolPolicy,
+	p fspolicy.FSPolicy,
 ) ([]spec.ToolStoreOutputUnion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
+
 	// Normalize and validate encoding.
-	enc := fileutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
+	enc := ioutil.ReadEncoding(strings.ToLower(strings.TrimSpace(args.Encoding)))
 	if enc == "" {
-		enc = fileutil.ReadEncodingText
+		enc = ioutil.ReadEncodingText
 	}
-	if enc != fileutil.ReadEncodingText && enc != fileutil.ReadEncodingBinary {
+	if enc != ioutil.ReadEncodingText && enc != ioutil.ReadEncodingBinary {
 		return nil, errors.New(`encoding must be "text" or "binary"`)
 	}
 
-	p, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	abs, err := p.ResolvePath(args.Path, "")
 	if err != nil {
 		return nil, err
 	}
 
-	// Refuse symlink traversal (file and parent dirs), and require regular file.
-	st, err := fileutil.RequireExistingRegularFileNoSymlink(p)
+	_, err = p.RequireExistingRegularFileResolved(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("path does not exist: %s", p)
+			return nil, fmt.Errorf("path does not exist: %s", abs)
 		}
 		return nil, err
 	}
-	if st.Size() > toolutil.MaxFileReadBytes {
-		return nil, fmt.Errorf(
-			"file %q is too large to read (%d bytes; max %d)",
-			p, st.Size(), toolutil.MaxFileReadBytes,
-		)
-	}
 
 	// Detect MIME / extension where possible.
-	mimeType, extMode, _, mimeErr := fileutil.MIMEForLocalFile(p)
-	ext := strings.ToLower(filepath.Ext(p))
+	mimeType, extMode, _, mimeErr := ioutil.MIMEForLocalFile(abs)
+	ext := strings.ToLower(filepath.Ext(abs))
 
-	isPDFByExt := ext == string(fileutil.ExtPDF)
-	isPDFByMime := mimeErr == nil && mimeType == fileutil.MIMEApplicationPDF
+	isPDFByExt := ext == string(ioutil.ExtPDF)
+	isPDFByMime := mimeErr == nil && mimeType == ioutil.MIMEApplicationPDF
 	isPDF := isPDFByExt || isPDFByMime
 
-	if enc == fileutil.ReadEncodingText {
+	if enc == ioutil.ReadEncodingText {
 		// For non-PDFs, fail if MIME detection fails (conservative).
 		// For PDFs, allow text extraction even if MIME sniffing fails,
 		// as long as the extension is .pdf.
 		if !isPDF && mimeErr != nil {
-			return nil, fmt.Errorf("cannot read %q as text (MIME detection failed: %w)", p, mimeErr)
+			return nil, fmt.Errorf("cannot read %q as text (MIME detection failed: %w)", abs, mimeErr)
 		}
 
 		if isPDF {
 			// PDF: use the same extraction logic as attachments.
 			// Extraction itself is limited to toolutil.MaxFileReadBytes via LimitedReader.
-			text, err := pdfutil.ExtractPDFTextSafe(ctx, p, toolutil.MaxFileReadBytes)
+			text, err := pdfutil.ExtractPDFTextSafe(ctx, abs, toolutil.MaxFileReadBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -132,22 +125,22 @@ func readFile(
 		}
 
 		// Non‑PDF: only allow clearly text-like files.
-		if extMode != fileutil.ExtensionModeText {
+		if extMode != ioutil.ExtensionModeText {
 			return nil, fmt.Errorf(
 				"cannot read non-text file %q as text; use encoding \"binary\" instead",
-				p,
+				abs,
 			)
 		}
 
 		// Normal text file: read and validate UTF‑8.
-		data, err := fileutil.ReadFile(p, fileutil.ReadEncodingText, toolutil.MaxFileReadBytes)
+		data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingText, toolutil.MaxFileReadBytes)
 		if err != nil {
 			return nil, err
 		}
 		if !utf8.ValidString(data) {
 			return nil, fmt.Errorf(
 				"file %q is not valid UTF-8 text; use encoding \"binary\" instead",
-				p,
+				abs,
 			)
 		}
 
@@ -162,12 +155,13 @@ func readFile(
 	}
 
 	// Binary mode: base64-encode and return, like before.
-	data, err := fileutil.ReadFile(p, fileutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
+	data, err := ioutil.ReadFile(abs, ioutil.ReadEncodingBinary, toolutil.MaxFileReadBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	baseName := filepath.Base(p)
+	baseName := filepath.Base(abs)
+
 	if baseName == "" {
 		baseName = "file"
 	}

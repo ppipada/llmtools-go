@@ -4,7 +4,8 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -66,32 +67,25 @@ type MIMEForPathOut struct {
 func mimeForPath(
 	ctx context.Context,
 	args MIMEForPathArgs,
-	tp fsToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*MIMEForPathOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
+	abs, mt, mode, method, err := ioutil.MIMEForPath(p, args.Path)
 	if err != nil {
 		return nil, err
 	}
 
-	ext := filepath.Ext(path)
-	normExt := fileutil.GetNormalizedExt(ext)
-
-	mt, mode, method, err := fileutil.MIMEForLocalFile(path)
-	if err != nil {
-		return nil, err
-	}
+	ext := filepath.Ext(abs)
+	normExt := ioutil.GetNormalizedExt(ext)
 
 	return &MIMEForPathOut{
-		Path:                path,
+		Path:                abs,
 		Extension:           ext,
 		NormalizedExtension: string(normExt),
 		MIMEType:            string(mt),
-		BaseMIMEType:        fileutil.GetBaseMIME(mt),
+		BaseMIMEType:        ioutil.GetBaseMIME(mt),
 		Mode:                MIMEMode(mode),
 		Method:              MIMEDetectMethod(method),
 	}, nil

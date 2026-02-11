@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -101,24 +102,18 @@ type InsertTextLinesOut struct {
 func insertTextLines(
 	ctx context.Context,
 	args InsertTextLinesArgs,
-	tp textToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*InsertTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
+
 	if len(args.LinesToInsert) == 0 {
 		return nil, errors.New("linesToInsert is required")
 	}
 
-	linesToInsert := fileutil.NormalizeLineBlockInput(args.LinesToInsert)
-	anchorLines := fileutil.NormalizeLineBlockInput(args.AnchorMatchLines)
-
+	linesToInsert := ioutil.NormalizeLineBlockInput(args.LinesToInsert)
+	anchorLines := ioutil.NormalizeLineBlockInput(args.AnchorMatchLines)
 	pos := strings.TrimSpace(strings.ToLower(args.Position))
 	if pos == "" {
 		pos = whereEnd
@@ -136,7 +131,7 @@ func insertTextLines(
 		// Index will error out.
 	}
 
-	tf, err := fileutil.ReadTextFileUTF8(path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +147,7 @@ func insertTextLines(
 	tf.Lines = insertLines(tf.Lines, insertAt, linesToInsert)
 
 	outStr := tf.Render()
-	if err := fileutil.WriteFileAtomicBytes(tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+	if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
 		return nil, err
 	}
 
@@ -173,8 +168,8 @@ func computeInsertIndex(lines []string, pos string, anchor []string) (insertAt i
 		if len(anchor) == 0 {
 			return 0, nil, errors.New(`position="beforeAnchor" requires anchorMatchLines`)
 		}
-		idxs := fileutil.FindTrimmedBlockMatches(lines, anchor)
-		i, e := fileutil.RequireSingleMatch(idxs, "anchorMatchLines")
+		idxs := ioutil.FindTrimmedBlockMatches(lines, anchor)
+		i, e := ioutil.RequireSingleMatch(idxs, "anchorMatchLines")
 		if e != nil {
 			return 0, nil, e
 		}
@@ -184,8 +179,8 @@ func computeInsertIndex(lines []string, pos string, anchor []string) (insertAt i
 		if len(anchor) == 0 {
 			return 0, nil, errors.New(`position="afterAnchor" requires anchorMatchLines`)
 		}
-		idxs := fileutil.FindTrimmedBlockMatches(lines, anchor)
-		i, err := fileutil.RequireSingleMatch(idxs, "anchorMatchLines")
+		idxs := ioutil.FindTrimmedBlockMatches(lines, anchor)
+		i, err := ioutil.RequireSingleMatch(idxs, "anchorMatchLines")
 		if err != nil {
 			return 0, nil, err
 		}

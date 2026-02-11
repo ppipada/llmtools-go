@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -86,15 +87,9 @@ type DeleteTextLinesOut struct {
 func deleteTextLines(
 	ctx context.Context,
 	args DeleteTextLinesArgs,
-	tp textToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*DeleteTextLinesOut, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
 		return nil, err
 	}
 
@@ -102,21 +97,21 @@ func deleteTextLines(
 		return nil, errors.New("matchLines is required")
 	}
 
-	matchLines := fileutil.NormalizeLineBlockInput(args.MatchLines)
-	beforeLines := fileutil.NormalizeLineBlockInput(args.BeforeLines)
-	afterLines := fileutil.NormalizeLineBlockInput(args.AfterLines)
+	matchLines := ioutil.NormalizeLineBlockInput(args.MatchLines)
+	beforeLines := ioutil.NormalizeLineBlockInput(args.BeforeLines)
+	afterLines := ioutil.NormalizeLineBlockInput(args.AfterLines)
 	expected := args.ExpectedDeletions
 	if expected <= 0 {
 		expected = 1
 	}
 
-	tf, err := fileutil.ReadTextFileUTF8(path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
 
-	matchIdxs := fileutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeLines, matchLines, afterLines)
-	if err := fileutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
+	matchIdxs := ioutil.FindTrimmedAdjacentBlockMatches(tf.Lines, beforeLines, matchLines, afterLines)
+	if err := ioutil.EnsureNonOverlappingFixedWidth(matchIdxs, len(matchLines)); err != nil {
 		return nil, err
 	}
 	if len(matchIdxs) != expected {
@@ -142,7 +137,7 @@ func deleteTextLines(
 
 		// Preserve final newline behavior.
 		outStr := tf.Render()
-		if err := fileutil.WriteFileAtomicBytes(tf.Path, []byte(outStr), tf.Perm, true); err != nil {
+		if err := ioutil.WriteFileAtomicBytesResolved(p, tf.Path, []byte(outStr), tf.Perm, true); err != nil {
 			return nil, err
 		}
 	}

@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -16,8 +17,12 @@ func TestWriteFileAtomicBytes_BasicAndSymlinkParent(t *testing.T) {
 	dir := t.TempDir()
 
 	dst := filepath.Join(dir, "out.txt")
+	policy, err := fspolicy.New("", nil, true)
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
 
-	if err := WriteFileAtomicBytes(dst, []byte("hello\n"), 0o640, true); err != nil {
+	if err := WriteFileAtomicBytesResolved(policy, dst, []byte("hello\n"), 0o640, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	b, err := os.ReadFile(dst)
@@ -29,7 +34,7 @@ func TestWriteFileAtomicBytes_BasicAndSymlinkParent(t *testing.T) {
 	}
 
 	// Overwrite.
-	if err := WriteFileAtomicBytes(dst, []byte("changed"), 0o600, true); err != nil {
+	if err := WriteFileAtomicBytesResolved(policy, dst, []byte("changed"), 0o600, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	b, _ = os.ReadFile(dst)
@@ -59,7 +64,7 @@ func TestWriteFileAtomicBytes_BasicAndSymlinkParent(t *testing.T) {
 		linkParent := filepath.Join(dir, "linkparent")
 		mustSymlinkOrSkip(t, realParent, linkParent)
 
-		err := WriteFileAtomicBytes(filepath.Join(linkParent, "x.txt"), []byte("nope"), 0o600, true)
+		err := WriteFileAtomicBytesResolved(policy, filepath.Join(linkParent, "x.txt"), []byte("nope"), 0o600, true)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
@@ -121,7 +126,11 @@ func TestWriteFileAtomicBytes_OverwriteFalseAndDestinationType(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := WriteFileAtomicBytes(tc.path, tc.data, tc.perm, tc.overwrite)
+			policy, err := fspolicy.New("", nil, true)
+			if err != nil {
+				t.Fatalf("unexpected error %v", err)
+			}
+			err = WriteFileAtomicBytesResolved(policy, tc.path, tc.data, tc.perm, tc.overwrite)
 			if tc.wantErrIs != nil || tc.wantErrContains != "" {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -146,5 +155,44 @@ func TestWriteFileAtomicBytes_OverwriteFalseAndDestinationType(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWriteFileAtomicBytes_RefusesSymlinkDestination_EvenIfSymlinksAllowed(t *testing.T) {
+	t.Parallel()
+
+	// On Windows, symlink creation commonly requires special privileges; skip for stability.
+	if runtime.GOOS == toolutil.GOOSWindows {
+		t.Skip("symlink test skipped on Windows")
+	}
+
+	dir := t.TempDir()
+
+	realTxt := filepath.Join(dir, "real.txt")
+	mustWriteBytes(t, realTxt, []byte("REAL"))
+
+	link := filepath.Join(dir, "link.txt")
+	mustSymlinkOrSkip(t, realTxt, link)
+
+	p, err := fspolicy.New(dir, nil, false) // symlinks allowed by policy
+	if err != nil {
+		t.Fatalf("New policy: %v", err)
+	}
+
+	err = WriteFileAtomicBytesResolved(p, link, []byte("DATA"), 0o600, true)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "symlink destination") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Ensure the target wasn't modified.
+	b, rerr := os.ReadFile(realTxt)
+	if rerr != nil {
+		t.Fatalf("read real: %v", rerr)
+	}
+	if string(b) != "REAL" {
+		t.Fatalf("real content=%q want %q", string(b), "REAL")
 	}
 }

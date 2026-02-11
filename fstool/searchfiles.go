@@ -3,7 +3,8 @@ package fstool
 import (
 	"context"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -62,21 +63,12 @@ type SearchFilesOut struct {
 func searchFiles(
 	ctx context.Context,
 	args SearchFilesArgs,
-	tp fsToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*SearchFilesOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
-	root, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Root, ".")
-	if err != nil {
-		return nil, err
-	}
-	if err := fileutil.VerifyDirNoSymlink(root); err != nil {
-		return nil, err
-	}
-	matches, reachedLimit, err := fileutil.SearchFiles(ctx, root, args.Pattern, args.MaxResults)
+	matches, reachedLimit, err := ioutil.SearchFiles(ctx, p, args.Root, args.Pattern, args.MaxResults)
 	if err != nil {
 		return nil, err
 	}

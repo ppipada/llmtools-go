@@ -1,4 +1,4 @@
-package fileutil
+package ioutil
 
 import (
 	"bytes"
@@ -273,10 +273,4 @@ func TestCopyFileToExistingCtx_Errors(t *testing.T) {
 			}
 		})
 	}
-}
-
-func canceledContext(ctx context.Context) context.Context {
-	ctx, cancel := context.WithCancel(ctx)
-	cancel()
-	return ctx
 }

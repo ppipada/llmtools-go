@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 )
 
@@ -153,10 +152,7 @@ func (sess *ShellSession) GetEffectiveEnv(overrides map[string]string) ([]string
 	return out, nil
 }
 
-func (sess *ShellSession) GetEffectiveWorkdir(
-	inputWorkDir, defaultWorkDir string,
-	allowedRoots []string,
-) (string, error) {
+func (sess *ShellSession) GetEffectiveWorkdir(inputWorkDir, defaultWorkDir string) (string, error) {
 	if sess == nil {
 		return "", errors.New("invalid session")
 	}
@@ -185,11 +181,7 @@ func (sess *ShellSession) GetEffectiveWorkdir(
 	if checkWorkDir == "" {
 		return "", errors.New("got invalid workdir")
 	}
-	p, err := fileutil.GetEffectiveWorkDir(checkWorkDir, allowedRoots)
-	if err != nil {
-		return "", err
-	}
-	return p, nil
+	return checkWorkDir, nil
 }
 
 func ValidateEnvMap(m map[string]string) error {

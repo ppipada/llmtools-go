@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/flexigpt/llmtools-go/internal/executil"
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -49,10 +49,18 @@ func DefaultExecutionPolicy() ExecutionPolicy {
 	}
 }
 
-type execToolPolicy struct {
+type execToolConfig struct {
 	allowedRoots    []string
 	workBaseDir     string
 	blockSymlinks   bool
+	blockedCommands map[string]struct{}
+
+	executionPolicy ExecutionPolicy
+	runScriptPolicy RunScriptPolicy
+}
+
+type execToolPolicy struct {
+	fsPolicy        fspolicy.FSPolicy
 	blockedCommands map[string]struct{}
 
 	executionPolicy ExecutionPolicy
@@ -67,13 +75,6 @@ func (p *execToolPolicy) Clone() *execToolPolicy {
 
 	cp := new(execToolPolicy)
 	*cp = *p // copy all value fields (and slice/map headers)
-
-	if p.allowedRoots != nil {
-		cp.allowedRoots = make([]string, len(p.allowedRoots))
-		copy(cp.allowedRoots, p.allowedRoots)
-	} else {
-		cp.allowedRoots = nil
-	}
 
 	if p.blockedCommands != nil {
 		cp.blockedCommands = make(map[string]struct{}, len(p.blockedCommands))
@@ -101,8 +102,8 @@ func (p *execToolPolicy) Clone() *execToolPolicy {
 //   - session store for shellcommand
 //   - runscript policy (optional tool).
 type ExecTool struct {
-	mu sync.RWMutex
-
+	mu         sync.RWMutex
+	cfg        execToolConfig
 	toolPolicy *execToolPolicy
 	sessions   *executil.SessionStore
 }
@@ -111,16 +112,14 @@ type ExecToolOption func(*ExecTool) error
 
 func WithAllowedRoots(roots []string) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
-		et.toolPolicy.allowedRoots = roots
+		et.cfg.allowedRoots = roots
 		return nil
 	}
 }
 
 func WithWorkBaseDir(base string) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
-		et.toolPolicy.workBaseDir = base
+		et.cfg.workBaseDir = base
 		return nil
 	}
 }
@@ -128,16 +127,14 @@ func WithWorkBaseDir(base string) ExecToolOption {
 // WithBlockSymlinks configures whether symlink traversal should be blocked (if supported downstream).
 func WithBlockSymlinks(block bool) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
-		et.toolPolicy.blockSymlinks = block
+		et.cfg.blockSymlinks = block
 		return nil
 	}
 }
 
 func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
-		et.toolPolicy.executionPolicy = p
+		et.cfg.executionPolicy = p
 		return nil
 	}
 }
@@ -146,9 +143,8 @@ func WithExecutionPolicy(p ExecutionPolicy) ExecToolOption {
 // Entries must be single command names (not full command lines).
 func WithBlockedCommands(cmds []string) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
-		if et.toolPolicy.blockedCommands == nil {
-			et.toolPolicy.blockedCommands = maps.Clone(executil.HardBlockedCommands)
+		if et.cfg.blockedCommands == nil {
+			et.cfg.blockedCommands = maps.Clone(executil.HardBlockedCommands)
 		}
 
 		for _, c := range cmds {
@@ -160,12 +156,13 @@ func WithBlockedCommands(cmds []string) ExecToolOption {
 				continue
 			}
 
-			et.toolPolicy.blockedCommands[n] = struct{}{}
+			et.cfg.blockedCommands[n] = struct{}{}
+
 			if runtime.GOOS == toolutil.GOOSWindows {
 				ext := strings.ToLower(filepath.Ext(n))
 				switch ext {
 				case ".exe", ".com", ".bat", ".cmd":
-					et.toolPolicy.blockedCommands[strings.TrimSuffix(n, ext)] = struct{}{}
+					et.cfg.blockedCommands[strings.TrimSuffix(n, ext)] = struct{}{}
 				}
 			}
 		}
@@ -175,12 +172,12 @@ func WithBlockedCommands(cmds []string) ExecToolOption {
 
 func WithRunScriptPolicy(p RunScriptPolicy) ExecToolOption {
 	return func(et *ExecTool) error {
-		et.ensurePolicy()
 		norm, err := NormalizeRunScriptPolicy(p)
 		if err != nil {
 			return err
 		}
-		et.toolPolicy.runScriptPolicy = norm
+		et.cfg.runScriptPolicy = norm
+
 		return nil
 	}
 }
@@ -207,7 +204,7 @@ func WithMaxSessions(maxSessions int) ExecToolOption {
 
 func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 	et := &ExecTool{
-		toolPolicy: &execToolPolicy{
+		cfg: execToolConfig{
 			allowedRoots:    nil,
 			workBaseDir:     "",
 			blockSymlinks:   false,
@@ -228,24 +225,22 @@ func NewExecTool(opts ...ExecToolOption) (*ExecTool, error) {
 		}
 	}
 
-	// Canonicalize/initialize path policy.
-	eff, roots, err := fileutil.InitPathPolicy(et.toolPolicy.workBaseDir, et.toolPolicy.allowedRoots)
+	// Canonicalize/initialize path policy (fspolicy is the single source of truth).
+	fsPol, err := fspolicy.New(et.cfg.workBaseDir, et.cfg.allowedRoots, et.cfg.blockSymlinks)
 	if err != nil {
 		return nil, err
 	}
 
 	// Final defensive normalization (covers defaults and any options that didn't normalize).
-	rsPol, err := NormalizeRunScriptPolicy(et.toolPolicy.runScriptPolicy)
+	rsPol, err := NormalizeRunScriptPolicy(et.cfg.runScriptPolicy)
 	if err != nil {
 		return nil, err
 	}
 
 	et.toolPolicy = &execToolPolicy{
-		allowedRoots:    roots,
-		workBaseDir:     eff,
-		blockSymlinks:   et.toolPolicy.blockSymlinks,
-		blockedCommands: et.toolPolicy.blockedCommands,
-		executionPolicy: et.toolPolicy.executionPolicy,
+		fsPolicy:        fsPol,
+		blockedCommands: maps.Clone(et.cfg.blockedCommands),
+		executionPolicy: et.cfg.executionPolicy,
 		runScriptPolicy: rsPol,
 	}
 
@@ -277,18 +272,4 @@ func (et *ExecTool) snapshotPolicy() *execToolPolicy {
 		return nil
 	}
 	return p.Clone()
-}
-
-func (et *ExecTool) ensurePolicy() {
-	if et.toolPolicy != nil {
-		return
-	}
-	et.toolPolicy = &execToolPolicy{
-		allowedRoots:    nil,
-		workBaseDir:     "",
-		blockSymlinks:   false,
-		blockedCommands: maps.Clone(executil.HardBlockedCommands),
-		executionPolicy: DefaultExecutionPolicy(),
-		runScriptPolicy: DefaultRunScriptPolicy(),
-	}
 }

@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/internal/toolutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
@@ -90,23 +91,15 @@ type ReadTextRangeOut struct {
 func readTextRange(
 	ctx context.Context,
 	args ReadTextRangeArgs,
-	tp textToolPolicy,
+	p fspolicy.FSPolicy,
 ) (*ReadTextRangeOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	workBaseDir := tp.workBaseDir
-	allowedRoots := tp.allowedRoots
+	startBlock := ioutil.NormalizeLineBlockInput(args.StartMatchLines)
+	endBlock := ioutil.NormalizeLineBlockInput(args.EndMatchLines)
 
-	path, err := fileutil.ResolvePath(workBaseDir, allowedRoots, args.Path, "")
-	if err != nil {
-		return nil, err
-	}
-
-	startBlock := fileutil.NormalizeLineBlockInput(args.StartMatchLines)
-	endBlock := fileutil.NormalizeLineBlockInput(args.EndMatchLines)
-
-	tf, err := fileutil.ReadTextFileUTF8(path, toolutil.MaxTextProcessingBytes)
+	tf, err := ioutil.ReadTextFileUTF8(p, args.Path, toolutil.MaxTextProcessingBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +122,7 @@ func readTextRange(
 	var haveEndIdx bool
 
 	if len(startBlock) > 0 {
-		startIdx, err = fileutil.RequireSingleTrimmedBlockMatch(tf.Lines, startBlock, "startMatchLines")
+		startIdx, err = ioutil.RequireSingleTrimmedBlockMatch(tf.Lines, startBlock, "startMatchLines")
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +131,7 @@ func readTextRange(
 	}
 
 	if len(endBlock) > 0 {
-		endIdx, err = fileutil.RequireSingleTrimmedBlockMatch(tf.Lines, endBlock, "endMatchLines")
+		endIdx, err = ioutil.RequireSingleTrimmedBlockMatch(tf.Lines, endBlock, "endMatchLines")
 		if err != nil {
 			return nil, err
 		}

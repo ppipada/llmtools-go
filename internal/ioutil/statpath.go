@@ -1,10 +1,12 @@
-package fileutil
+package ioutil
 
 import (
 	"errors"
 	"io/fs"
 	"os"
 	"time"
+
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
 )
 
 type PathInfo struct {
@@ -18,26 +20,40 @@ type PathInfo struct {
 
 // StatPath returns basic metadata for the supplied path without mutating the filesystem.
 // If the path does not exist, exists == false and err == nil.
-func StatPath(path string) (pathInfo *PathInfo, err error) {
-	p, err := NormalizePath(path)
+//
+// FSPolicy enforcement:
+//   - path resolved via policy (base dir + allowed roots)
+//   - if policy.BlockSymlinks == true: refuses symlink targets (Lstat + reject).
+func StatPath(p fspolicy.FSPolicy, path string) (pathInfo *PathInfo, err error) {
+	abs, err := p.ResolvePath(path, "")
 	if err != nil {
 		return nil, err
 	}
+
 	pathInfo = &PathInfo{
-		Path:   p,
+		Path:   abs,
 		Exists: false,
 	}
 
-	info, e := os.Stat(p)
-
-	if e != nil {
-		if errors.Is(e, os.ErrNotExist) {
-			return pathInfo, nil
-		}
-		return nil, e
+	var info fs.FileInfo
+	if p.BlockSymlinks() {
+		info, err = os.Lstat(abs)
+	} else {
+		info, err = os.Stat(abs)
 	}
 
-	pInfo := getPathInfoFromFileInfo(p, info)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return pathInfo, nil
+		}
+		return nil, err
+	}
+
+	if p.BlockSymlinks() && (info.Mode()&os.ModeSymlink) != 0 {
+		return nil, fspolicy.ErrSymlinkDisallowed
+	}
+
+	pInfo := getPathInfoFromFileInfo(abs, info)
 	return &pInfo, nil
 }
 

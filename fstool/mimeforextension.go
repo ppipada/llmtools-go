@@ -5,7 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/flexigpt/llmtools-go/internal/fileutil"
+	"github.com/flexigpt/llmtools-go/internal/fspolicy"
+	"github.com/flexigpt/llmtools-go/internal/ioutil"
 	"github.com/flexigpt/llmtools-go/spec"
 )
 
@@ -66,20 +67,24 @@ type MIMEForExtensionOut struct {
 // - mimeType: "application/octet-stream"
 // - known: false
 // and does NOT error (so calling code can continue).
-func mimeForExtension(ctx context.Context, args MIMEForExtensionArgs, tp fsToolPolicy) (*MIMEForExtensionOut, error) {
+func mimeForExtension(
+	ctx context.Context,
+	args MIMEForExtensionArgs,
+	_ fspolicy.FSPolicy,
+) (*MIMEForExtensionOut, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
 	extIn := strings.TrimSpace(args.Extension)
 	if extIn == "" {
-		return nil, fileutil.ErrInvalidPath
+		return nil, ioutil.ErrInvalidPath
 	}
 
-	mt, err := fileutil.MIMEFromExtensionString(extIn)
+	mt, err := ioutil.MIMEFromExtensionString(extIn)
 
 	known := err == nil
-	if errors.Is(err, fileutil.ErrUnknownExtension) {
+	if errors.Is(err, ioutil.ErrUnknownExtension) {
 		// Unknown extension is not fatal for this tool.
 		known = false
 		err = nil
@@ -88,15 +93,15 @@ func mimeForExtension(ctx context.Context, args MIMEForExtensionArgs, tp fsToolP
 		return nil, err
 	}
 
-	normExt := fileutil.GetNormalizedExt(extIn)
-	base := fileutil.GetBaseMIME(mt)
+	normExt := ioutil.GetNormalizedExt(extIn)
+	base := ioutil.GetBaseMIME(mt)
 
 	return &MIMEForExtensionOut{
 		Extension:           extIn,
 		NormalizedExtension: string(normExt),
 		MIMEType:            string(mt),
 		BaseMIMEType:        base,
-		Mode:                MIMEMode(fileutil.GetModeForMIME(mt)),
+		Mode:                MIMEMode(ioutil.GetModeForMIME(mt)),
 		Known:               known,
 	}, nil
 }
