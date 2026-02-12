@@ -142,7 +142,7 @@ func (p FSPolicy) VerifyDirResolved(absDir string) error {
 	if !p.blockSymlinks {
 		st, err := os.Stat(d)
 		if err != nil {
-			return err
+			return fmt.Errorf("stat dir error: %w", err)
 		}
 		if !st.IsDir() {
 			return fmt.Errorf("not a directory: %s", d)

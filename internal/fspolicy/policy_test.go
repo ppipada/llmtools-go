@@ -201,9 +201,14 @@ func TestResolvePath_HappyAndErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolvePath(%q,%q) error: %v", c.in, c.def, err)
 			}
-			wantClean := filepath.Clean(pathAbs(t, c.want))
-			if got != wantClean {
-				t.Fatalf("ResolvePath(%q)=%q, want %q", c.in, got, wantClean)
+			abs, err := filepath.Abs(c.want)
+			if err != nil {
+				t.Fatalf("Abs(%q): %v", c.want, err)
+			}
+			abs = applySystemRootAliases(abs)
+
+			if got != abs {
+				t.Fatalf("ResolvePath(%q)=%q, want %q", c.in, got, abs)
 			}
 		})
 	}
