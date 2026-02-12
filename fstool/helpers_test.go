@@ -74,6 +74,7 @@ func decodeBase64OrFail(t *testing.T, s string) []byte {
 // but policy returns /private/var paths.
 func canonForPolicyExpectations(p string) string {
 	p = filepath.Clean(p)
+	p = evalTestSymlinksBestEffort(p)
 	if runtime.GOOS != toolutil.GOOSDarwin {
 		return p
 	}
@@ -93,6 +94,36 @@ func canonForPolicyExpectations(p string) string {
 		if strings.HasPrefix(p, from+sep) {
 			return to + p[len(from):]
 		}
+	}
+	return p
+}
+
+func evalTestSymlinksBestEffort(p string) string {
+	p = filepath.Clean(p)
+	tried := p
+	remainder := ""
+
+	for range 64 {
+		if resolved, err := filepath.EvalSymlinks(tried); err == nil && resolved != "" {
+			resolved = filepath.Clean(resolved)
+			if remainder == "" {
+				return resolved
+			}
+			return filepath.Join(resolved, remainder)
+		}
+
+		parent := filepath.Dir(tried)
+		if parent == tried {
+			return p
+		}
+
+		base := filepath.Base(tried)
+		if remainder == "" {
+			remainder = base
+		} else {
+			remainder = filepath.Join(base, remainder)
+		}
+		tried = parent
 	}
 	return p
 }

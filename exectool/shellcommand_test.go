@@ -37,7 +37,7 @@ func TestShellCommand_AutoSession_DoesNotLeakOnError(t *testing.T) {
 		{
 			name:          "workdir_does_not_exist",
 			args:          ShellCommandArgs{Commands: []string{"echo hi"}, WorkDir: nonexistent},
-			wantErrSubstr: "no such file or directory",
+			wantErrSubstr: "stat dir error",
 		},
 		{
 			name:          "invalid_env_map",
