@@ -239,7 +239,7 @@ func (p FSPolicy) resolvePathWithCheck(inputPath, defaultIfEmpty string) (absLex
 
 	absLex, err = filepath.Abs(norm)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("could not resolve path: %w", err)
 	}
 	absLex = filepath.Clean(absLex)
 

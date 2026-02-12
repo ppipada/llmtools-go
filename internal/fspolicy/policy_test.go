@@ -424,7 +424,10 @@ func TestConcurrency_ResolvePathAndEnsureDir(t *testing.T) {
 				errCh <- fmt.Errorf("ResolvePath: %w", err)
 				return
 			}
-			if !strings.HasPrefix(abs, applySystemRootAliases(shared+string(os.PathSeparator))) && abs != shared {
+			checkPath := applySystemRootAliases(shared + string(os.PathSeparator))
+			// Canonicalize for allowed-root comparisons (symlinks/junctions/8.3 names).
+			checkPath = evalSymlinksBestEffort(checkPath)
+			if !strings.HasPrefix(abs, checkPath) && abs != shared {
 				errCh <- fmt.Errorf("resolved path not under shared: %q", abs)
 				return
 			}
