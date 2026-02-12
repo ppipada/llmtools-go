@@ -129,6 +129,7 @@ func TestDeleteFile(t *testing.T) {
 						t.Fatalf("expected non-nil out")
 					}
 					gotDir := filepath.Clean(filepath.Dir(out.TrashedPath))
+					gotDir = evalTestSymlinksBestEffort(gotDir)
 					wantDir := canonForPolicyExpectations(trash)
 					if gotDir != filepath.Clean(wantDir) {
 						t.Fatalf("trashed dir=%q want=%q (out=%+v)", gotDir, wantDir, out)
