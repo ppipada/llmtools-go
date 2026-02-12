@@ -72,5 +72,7 @@ func pathAbs(t *testing.T, p string) string {
 	if err != nil {
 		t.Fatalf("Abs(%q): %v", p, err)
 	}
-	return applySystemRootAliases(abs)
+	abs = applySystemRootAliases(abs)
+	abs = evalSymlinksBestEffort(abs)
+	return abs
 }
