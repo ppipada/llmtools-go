@@ -2,6 +2,7 @@ package fstool
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,7 +101,7 @@ func TestMIMEForPath(t *testing.T) {
 				t.Helper()
 				return MIMEForPathArgs{Path: filepath.Join(c.workBaseDir, "missing.unknownext")}
 			},
-			wantErr: func(err error) bool { return err != nil && os.IsNotExist(err) },
+			wantErr: func(err error) bool { return err != nil && errors.Is(err, os.ErrNotExist) },
 		},
 		{
 			name: "existing_no_extension_sniffs_text",
