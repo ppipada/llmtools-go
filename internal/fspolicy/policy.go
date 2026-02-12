@@ -288,7 +288,7 @@ func (p FSPolicy) requireExistingRegularFileAbs(absPath string) (fs.FileInfo, er
 	// Symlinks allowed: Stat follows symlinks.
 	st, err := os.Stat(absPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stat file error: %w", err)
 	}
 	if st.IsDir() {
 		return nil, fmt.Errorf("expected file but got directory: %s", absPath)
@@ -376,7 +376,7 @@ func (p FSPolicy) walkDirNoSymlinkAbs(dir string, createMissing bool, maxNewDirs
 			return created, fmt.Errorf("too many parent directories to create (max %d)", maxNewDirs)
 		}
 		if err := os.Mkdir(cur, 0o755); err != nil {
-			return created, err
+			return created, fmt.Errorf("could not make dir:%w", err)
 		}
 		created++
 	}
@@ -385,7 +385,7 @@ func (p FSPolicy) walkDirNoSymlinkAbs(dir string, createMissing bool, maxNewDirs
 	if !createMissing {
 		st, err := os.Stat(d)
 		if err != nil {
-			return created, err
+			return created, fmt.Errorf("stat error: %w", err)
 		}
 		if !st.IsDir() {
 			return created, fmt.Errorf("not a directory: %s", d)
