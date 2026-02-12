@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,7 +69,8 @@ func TestReadImage(t *testing.T) {
 					t.Fatalf("expected Exists=true")
 				}
 				cleanpath := filepath.Clean(imgPath)
-				if out.Path != cleanpath {
+				if !strings.Contains(out.Path, cleanpath) {
+					// We need to check contains as output will be cleaned and with system aliases modified.
 					t.Fatalf(
 						"Path mismatch: got %q want %q",
 						out.Path,
