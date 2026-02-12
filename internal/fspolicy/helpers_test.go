@@ -72,5 +72,5 @@ func pathAbs(t *testing.T, p string) string {
 	if err != nil {
 		t.Fatalf("Abs(%q): %v", p, err)
 	}
-	return abs
+	return applySystemRootAliases(abs)
 }

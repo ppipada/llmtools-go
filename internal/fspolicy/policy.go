@@ -366,10 +366,10 @@ func (p FSPolicy) walkDirNoSymlinkAbs(dir string, createMissing bool, maxNewDirs
 		}
 
 		if !errors.Is(err, os.ErrNotExist) {
-			return created, err
+			return created, fmt.Errorf("stat error: %w", err)
 		}
 		if !createMissing {
-			return created, err
+			return created, fmt.Errorf("stat error: %w", err)
 		}
 
 		if maxNewDirs > 0 && created >= maxNewDirs {

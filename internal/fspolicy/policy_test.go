@@ -424,7 +424,7 @@ func TestConcurrency_ResolvePathAndEnsureDir(t *testing.T) {
 				errCh <- fmt.Errorf("ResolvePath: %w", err)
 				return
 			}
-			if !strings.HasPrefix(abs, shared+string(os.PathSeparator)) && abs != shared {
+			if !strings.HasPrefix(abs, applySystemRootAliases(shared+string(os.PathSeparator))) && abs != shared {
 				errCh <- fmt.Errorf("resolved path not under shared: %q", abs)
 				return
 			}
