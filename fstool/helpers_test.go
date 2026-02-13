@@ -128,14 +128,6 @@ func evalTestSymlinksBestEffort(p string) string {
 	return p
 }
 
-func stringSliceAsSet(in []string) map[string]int {
-	m := make(map[string]int, len(in))
-	for _, s := range in {
-		m[s]++
-	}
-	return m
-}
-
 func equalStringMultisets(a, b []string) bool {
 	ma := stringSliceAsSet(a)
 	mb := stringSliceAsSet(b)
@@ -148,6 +140,14 @@ func equalStringMultisets(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func stringSliceAsSet(in []string) map[string]int {
+	m := make(map[string]int, len(in))
+	for _, s := range in {
+		m[s]++
+	}
+	return m
 }
 
 func wantErrContains(substr string) func(error) bool {

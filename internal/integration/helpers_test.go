@@ -123,7 +123,7 @@ func callJSON[T any](t *testing.T, r *llmtools.Registry, slug string, args any) 
 	t.Helper()
 
 	rawOut := callRaw(t, r, slug, args)
-	if len(rawOut) != 1 || rawOut[0].Kind != spec.ToolStoreOutputKindText || rawOut[0].TextItem == nil {
+	if len(rawOut) != 1 || rawOut[0].Kind != spec.ToolOutputKindText || rawOut[0].TextItem == nil {
 		t.Fatalf("expected single text output for %s, got: %+v", slug, rawOut)
 	}
 	var decoded T
@@ -133,7 +133,7 @@ func callJSON[T any](t *testing.T, r *llmtools.Registry, slug string, args any) 
 	return decoded
 }
 
-func callRaw(t *testing.T, r *llmtools.Registry, slug string, args any) []spec.ToolStoreOutputUnion {
+func callRaw(t *testing.T, r *llmtools.Registry, slug string, args any) []spec.ToolOutputUnion {
 	t.Helper()
 
 	in, err := json.Marshal(args)
@@ -159,9 +159,9 @@ func funcIDBySlug(t *testing.T, r *llmtools.Registry, slug string) spec.FuncID {
 	return ""
 }
 
-func requireSingleTextOutput(t *testing.T, out []spec.ToolStoreOutputUnion) string {
+func requireSingleTextOutput(t *testing.T, out []spec.ToolOutputUnion) string {
 	t.Helper()
-	if len(out) != 1 || out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
+	if len(out) != 1 || out[0].Kind != spec.ToolOutputKindText || out[0].TextItem == nil {
 		t.Fatalf("expected single text output, got: %+v", out)
 	}
 	return out[0].TextItem.Text
@@ -169,9 +169,9 @@ func requireSingleTextOutput(t *testing.T, out []spec.ToolStoreOutputUnion) stri
 
 func requireKind(
 	t *testing.T,
-	out []spec.ToolStoreOutputUnion,
-	kind spec.ToolStoreOutputKind,
-) spec.ToolStoreOutputUnion {
+	out []spec.ToolOutputUnion,
+	kind spec.ToolOutputKind,
+) spec.ToolOutputUnion {
 	t.Helper()
 	for _, item := range out {
 		if item.Kind == kind {
@@ -179,7 +179,7 @@ func requireKind(
 		}
 	}
 	t.Fatalf("expected output kind %q, got: %+v", kind, out)
-	return spec.ToolStoreOutputUnion{}
+	return spec.ToolOutputUnion{}
 }
 
 func debugJSON(t *testing.T, v any) string {

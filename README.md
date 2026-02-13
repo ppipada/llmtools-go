@@ -108,7 +108,7 @@ The registry provides:
 
 ## Tool outputs
 
-- `Registry.Call` returns `[]spec.ToolStoreOutputUnion`.
+- `Registry.Call` returns `[]spec.ToolOutputUnion`.
 
 - The call wrapper can modify the union to support two common patterns:
   - Structured JSON-as-text (most tools)

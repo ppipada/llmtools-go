@@ -44,7 +44,7 @@ func TestNewRegistry_Options(t *testing.T) {
 }
 
 func TestRegistry_RegisterTool_Validation(t *testing.T) {
-	okFn := func(context.Context, json.RawMessage) ([]spec.ToolStoreOutputUnion, error) { return nil, nil }
+	okFn := func(context.Context, json.RawMessage) ([]spec.ToolOutputUnion, error) { return nil, nil }
 
 	tests := []struct {
 		name            string
@@ -137,7 +137,7 @@ func TestRegistry_RegisterTool_Duplicate(t *testing.T) {
 	}
 
 	tool := mkTool("github.com/acme/tools.Dupe", "dupe")
-	fn := func(context.Context, json.RawMessage) ([]spec.ToolStoreOutputUnion, error) { return nil, nil }
+	fn := func(context.Context, json.RawMessage) ([]spec.ToolOutputUnion, error) { return nil, nil }
 
 	if err := r.RegisterTool(tool, fn); err != nil {
 		t.Fatalf("first RegisterTool error: %v", err)
@@ -154,7 +154,7 @@ func TestRegistry_Lookup(t *testing.T) {
 		t.Fatalf("NewRegistry error: %v", err)
 	}
 
-	fn := func(context.Context, json.RawMessage) ([]spec.ToolStoreOutputUnion, error) { return textOut("ok"), nil }
+	fn := func(context.Context, json.RawMessage) ([]spec.ToolOutputUnion, error) { return textOut("ok"), nil }
 	tool := mkTool("github.com/acme/tools.Lookup", "lookup")
 
 	if err := r.RegisterTool(tool, fn); err != nil {
@@ -178,7 +178,7 @@ func TestRegistry_Tools_SortedAndCloned(t *testing.T) {
 		t.Fatalf("NewRegistry error: %v", err)
 	}
 
-	dummy := func(context.Context, json.RawMessage) ([]spec.ToolStoreOutputUnion, error) { return nil, nil }
+	dummy := func(context.Context, json.RawMessage) ([]spec.ToolOutputUnion, error) { return nil, nil }
 
 	// Register in intentionally unsorted order.
 	t1 := mkTool("github.com/acme/tools.Z", "a") // slug a, func Z
@@ -313,7 +313,7 @@ func TestRegistry_Call_TimeoutResolution(t *testing.T) {
 			}
 
 			tool := mkTool("github.com/acme/tools.Sleepy", "sleepy")
-			fn := func(ctx context.Context, _ json.RawMessage) ([]spec.ToolStoreOutputUnion, error) {
+			fn := func(ctx context.Context, _ json.RawMessage) ([]spec.ToolOutputUnion, error) {
 				select {
 				case <-time.After(sleepDur):
 					return textOut("ok"), nil
@@ -341,7 +341,7 @@ func TestRegistry_Call_TimeoutResolution(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Call unexpected error: %v", err)
 			}
-			if len(out) != 1 || out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
+			if len(out) != 1 || out[0].Kind != spec.ToolOutputKindText || out[0].TextItem == nil {
 				t.Fatalf("Call output shape: got %#v want single text output", out)
 			}
 			if out[0].TextItem.Text != tc.wantTextOutput {
@@ -417,7 +417,7 @@ func TestRegisterTypedAsTextTool_StrictDecode_And_TextWrapping(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Call unexpected error: %v", err)
 			}
-			if len(out) != 1 || out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
+			if len(out) != 1 || out[0].Kind != spec.ToolOutputKindText || out[0].TextItem == nil {
 				t.Fatalf("Call output shape: got %#v want single text output", out)
 			}
 
@@ -497,7 +497,7 @@ func TestRegisterOutputsTool_StrictDecode(t *testing.T) {
 			}
 
 			tool := mkTool("github.com/acme/tools.TypedOutputs", "typedoutputs")
-			fn := func(_ context.Context, a args) ([]spec.ToolStoreOutputUnion, error) {
+			fn := func(_ context.Context, a args) ([]spec.ToolOutputUnion, error) {
 				return textOut(string(rune('0' + a.A))), nil
 			}
 
@@ -516,7 +516,7 @@ func TestRegisterOutputsTool_StrictDecode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Call unexpected error: %v", err)
 			}
-			if len(out) != 1 || out[0].Kind != spec.ToolStoreOutputKindText || out[0].TextItem == nil {
+			if len(out) != 1 || out[0].Kind != spec.ToolOutputKindText || out[0].TextItem == nil {
 				t.Fatalf("Call output shape: got %#v want single text output", out)
 			}
 			if out[0].TextItem.Text != tc.wantText {
@@ -542,11 +542,11 @@ func mkTool(funcID, slug string) spec.Tool {
 	}
 }
 
-func textOut(s string) []spec.ToolStoreOutputUnion {
-	return []spec.ToolStoreOutputUnion{
+func textOut(s string) []spec.ToolOutputUnion {
+	return []spec.ToolOutputUnion{
 		{
-			Kind: spec.ToolStoreOutputKindText,
-			TextItem: &spec.ToolStoreOutputText{
+			Kind: spec.ToolOutputKindText,
+			TextItem: &spec.ToolOutputText{
 				Text: s,
 			},
 		},

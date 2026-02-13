@@ -161,12 +161,12 @@ func RegisterBuiltins(r *Registry) error {
 	return nil
 }
 
-// RegisterOutputsTool registers a typed tool function that directly returns []ToolStoreOutputUnion.
+// RegisterOutputsTool registers a typed tool function that directly returns []ToolOutputUnion.
 // This is a function and not a method on struct as methods cannot have type params in go.
 func RegisterOutputsTool[T any](
 	r *Registry,
 	tool spec.Tool,
-	fn func(context.Context, T) ([]spec.ToolStoreOutputUnion, error),
+	fn func(context.Context, T) ([]spec.ToolOutputUnion, error),
 ) error {
 	return r.RegisterTool(tool, typedToOutputs(fn))
 }
@@ -236,8 +236,8 @@ func (r *Registry) Call(
 	funcID spec.FuncID,
 	in json.RawMessage,
 	callOpts ...CallOption,
-) ([]spec.ToolStoreOutputUnion, error) {
-	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
+) ([]spec.ToolOutputUnion, error) {
+	return toolutil.WithRecoveryResp(func() ([]spec.ToolOutputUnion, error) {
 		var co callOptions
 		for _, o := range callOpts {
 			if o != nil {
@@ -298,12 +298,12 @@ func (r *Registry) Tools() []spec.Tool {
 	return out
 }
 
-// typedToOutputs wraps a typed function (ctx, T) -> ([]ToolStoreOutputUnion, error)
+// typedToOutputs wraps a typed function (ctx, T) -> ([]ToolOutputUnion, error)
 // into a spec.ToolFunc that strictly decodes input into T.
 func typedToOutputs[T any](
-	fn func(context.Context, T) ([]spec.ToolStoreOutputUnion, error),
+	fn func(context.Context, T) ([]spec.ToolOutputUnion, error),
 ) spec.ToolFunc {
-	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolStoreOutputUnion, error) {
+	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolOutputUnion, error) {
 		// Decode input strictly into T (rejects unknown fields and trailing data).
 		args, err := jsonutil.DecodeJSONRaw[T](in)
 		if err != nil {
@@ -316,7 +316,7 @@ func typedToOutputs[T any](
 // typedToText wraps a typed function (ctx, T) -> (R, error) into a spec.ToolFunc
 // that JSON-encodes R and returns it as a single text output block.
 func typedToText[T, R any](fn func(context.Context, T) (R, error)) spec.ToolFunc {
-	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolStoreOutputUnion, error) {
+	return func(ctx context.Context, in json.RawMessage) ([]spec.ToolOutputUnion, error) {
 		// Decode input strictly into T (rejects unknown fields and trailing data).
 		args, err := jsonutil.DecodeJSONRaw[T](in)
 		if err != nil {
@@ -336,10 +336,10 @@ func typedToText[T, R any](fn func(context.Context, T) (R, error)) spec.ToolFunc
 		if text == "" || text == "null" {
 			return nil, nil
 		}
-		return []spec.ToolStoreOutputUnion{
+		return []spec.ToolOutputUnion{
 			{
-				Kind: spec.ToolStoreOutputKindText,
-				TextItem: &spec.ToolStoreOutputText{
+				Kind: spec.ToolOutputKindText,
+				TextItem: &spec.ToolOutputText{
 					Text: text,
 				},
 			},

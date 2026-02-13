@@ -41,7 +41,7 @@ func TestE2E_FS_MIME_Delete_And_ImageFlows(t *testing.T) {
 	}
 
 	readBin := callRaw(t, h.r, "readfile", fstool.ReadFileArgs{Path: binRel, Encoding: "binary"})
-	fileItem := requireKind(t, readBin, spec.ToolStoreOutputKindFile)
+	fileItem := requireKind(t, readBin, spec.ToolOutputKindFile)
 	if fileItem.FileItem == nil || fileItem.FileItem.FileData == "" {
 		t.Fatalf("expected file output with base64 data, got: %+v", fileItem)
 	}
@@ -118,7 +118,7 @@ func TestE2E_FS_MIME_Delete_And_ImageFlows(t *testing.T) {
 
 	// "readfile(binary)" should emit an image output for image/*.
 	readImg := callRaw(t, h.r, "readfile", fstool.ReadFileArgs{Path: "pixel.png", Encoding: "binary"})
-	imageItem := requireKind(t, readImg, spec.ToolStoreOutputKindImage)
+	imageItem := requireKind(t, readImg, spec.ToolOutputKindImage)
 	if imageItem.ImageItem == nil || imageItem.ImageItem.ImageData == "" {
 		t.Fatalf("expected image output with base64 data, got: %+v", imageItem)
 	}

@@ -121,8 +121,8 @@ func (ft *FSTool) MIMEForPath(ctx context.Context, args MIMEForPathArgs) (*MIMEF
 func (ft *FSTool) ReadFile(
 	ctx context.Context,
 	args ReadFileArgs,
-) ([]spec.ToolStoreOutputUnion, error) {
-	return toolutil.WithRecoveryResp(func() ([]spec.ToolStoreOutputUnion, error) {
+) ([]spec.ToolOutputUnion, error) {
+	return toolutil.WithRecoveryResp(func() ([]spec.ToolOutputUnion, error) {
 		p := ft.snapshotPolicy()
 		return readFile(ctx, args, p)
 	})

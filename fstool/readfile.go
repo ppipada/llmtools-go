@@ -63,7 +63,7 @@ func readFile(
 	ctx context.Context,
 	args ReadFileArgs,
 	p fspolicy.FSPolicy,
-) ([]spec.ToolStoreOutputUnion, error) {
+) ([]spec.ToolOutputUnion, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -114,10 +114,10 @@ func readFile(
 				return nil, err
 			}
 
-			return []spec.ToolStoreOutputUnion{
+			return []spec.ToolOutputUnion{
 				{
-					Kind: spec.ToolStoreOutputKindText,
-					TextItem: &spec.ToolStoreOutputText{
+					Kind: spec.ToolOutputKindText,
+					TextItem: &spec.ToolOutputText{
 						Text: text,
 					},
 				},
@@ -144,10 +144,10 @@ func readFile(
 			)
 		}
 
-		return []spec.ToolStoreOutputUnion{
+		return []spec.ToolOutputUnion{
 			{
-				Kind: spec.ToolStoreOutputKindText,
-				TextItem: &spec.ToolStoreOutputText{
+				Kind: spec.ToolOutputKindText,
+				TextItem: &spec.ToolOutputText{
 					Text: data,
 				},
 			},
@@ -181,10 +181,10 @@ func readFile(
 	}
 
 	if strings.HasPrefix(mt, "image/") {
-		return []spec.ToolStoreOutputUnion{
+		return []spec.ToolOutputUnion{
 			{
-				Kind: spec.ToolStoreOutputKindImage,
-				ImageItem: &spec.ToolStoreOutputImage{
+				Kind: spec.ToolOutputKindImage,
+				ImageItem: &spec.ToolOutputImage{
 					Detail:    spec.ImageDetailAuto,
 					ImageName: baseName,
 					ImageMIME: mt,
@@ -194,10 +194,10 @@ func readFile(
 		}, nil
 	}
 
-	return []spec.ToolStoreOutputUnion{
+	return []spec.ToolOutputUnion{
 		{
-			Kind: spec.ToolStoreOutputKindFile,
-			FileItem: &spec.ToolStoreOutputFile{
+			Kind: spec.ToolOutputKindFile,
+			FileItem: &spec.ToolOutputFile{
 				FileName: baseName,
 				FileMIME: mt,
 				FileData: data, // base64-encoded
