@@ -23,7 +23,7 @@ type (
 )
 
 // ToolFunc is the low-level function signature stored in the registry.
-// It receives JSON-encoded args and returns one or more tool-store outputs.
+// It receives JSON-encoded args and returns one or more tool outputs.
 type ToolFunc func(ctx context.Context, in json.RawMessage) ([]ToolOutputUnion, error)
 
 // GoToolImpl - Register-by-name pattern for Go tools.
